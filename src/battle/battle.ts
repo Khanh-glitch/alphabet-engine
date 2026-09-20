@@ -448,12 +448,17 @@ export class Battle {
 
   /** Player intervention: fill the single missing socket of one recipe. */
   useWildcard(slot: number): boolean {
-    if (this.wildcardsLeft <= 0 || this.state !== 'fight') return false;
+    // Legal during the intro as well as the fight. The brief calls out the old
+    // inconsistency (4.1): the control rendered as available during the intro and
+    // then refused to act. If the machine can resolve the socket, it should.
+    if (this.wildcardsLeft <= 0) return false;
+    if (this.state === 'cleared' || this.state === 'failed') return false;
     const target = this.targets.find((tg) => tg.slot === slot);
     if (!target) return false;
     // The machine places the tile in the exact socket that was empty, so the
     // wildcard resolves a *position*, not an abstract multiset (brief 3.3).
-    const letter = this.machine.fillSocket(target.slot, target.socket, this.time, 0);
+    const prov = this.provenance.letter({ kind: 'wildcard' }, this.time);
+    const letter = this.machine.fillSocket(target.slot, target.socket, this.time, prov);
     if (!letter) return false;
     this.wildcardsLeft -= 1;
     this.emit({ kind: 'wildcard', slot, letter: target.missing, socket: target.socket });

@@ -9,7 +9,6 @@ import { C, FIELD, laneY } from '../core/theme';
 import { clamp } from '../core/rng';
 import { glow, rgba, type Ctx } from '../core/draw';
 import type { BattleEvent } from '../battle/types';
-import type { Letter } from '../alphabet/types';
 
 interface Particle {
   x: number;
@@ -46,19 +45,6 @@ interface FloatingText {
   size: number;
 }
 
-interface FlyingLetter {
-  letter: Letter;
-  x: number;
-  y: number;
-  fromX: number;
-  fromY: number;
-  toX: number;
-  toY: number;
-  life: number;
-  max: number;
-  color: string;
-}
-
 export interface FxOptions {
   shake: number;
   reducedFlashes: boolean;
@@ -68,7 +54,7 @@ export class FxLayer {
   particles: Particle[] = [];
   rings: Ring[] = [];
   texts: FloatingText[] = [];
-  letters: FlyingLetter[] = [];
+
   /** Screen shake magnitude in logical pixels. */
   shake = 0;
   /** Full-screen flash alpha, already scaled by the player's settings. */
@@ -79,13 +65,9 @@ export class FxLayer {
     this.particles.length = 0;
     this.rings.length = 0;
     this.texts.length = 0;
-    this.letters.length = 0;
     this.shake = 0;
     this.flash = 0;
   }
-
-  /** Where a letter flies when it is recovered — the tray area. */
-  trayTarget: (index: number) => { x: number; y: number } = () => ({ x: 700, y: 762 });
 
   absorb(events: readonly BattleEvent[], opts: FxOptions): void {
     for (const ev of events) {
@@ -152,22 +134,6 @@ export class FxLayer {
             size: 30,
           });
           break;
-        case 'letterReturn': {
-          const to = this.trayTarget(0);
-          this.letters.push({
-            letter: ev.letter,
-            x: ev.x,
-            y: ev.y,
-            fromX: ev.x,
-            fromY: ev.y,
-            toX: to.x,
-            toY: to.y,
-            life: 0.55,
-            max: 0.55,
-            color: C.gold,
-          });
-          break;
-        }
         case 'chain':
           this.texts.push({
             x: FIELD.w / 2,
@@ -278,11 +244,6 @@ export class FxLayer {
       t.y -= dt * 34;
       if (t.life <= 0) this.texts.splice(i, 1);
     }
-    for (let i = this.letters.length - 1; i >= 0; i--) {
-      const l = this.letters[i];
-      l.life -= dt;
-      if (l.life <= 0) this.letters.splice(i, 1);
-    }
     this.shake = Math.max(0, this.shake - dt * 26);
     this.flash = Math.max(0, this.flash - dt * 2.2);
     this.shakeSeed += dt * 60;
@@ -334,25 +295,6 @@ export class FxLayer {
       g.arc(r.x, r.y, radius, 0, Math.PI * 2);
       g.stroke();
       glow(g, r.x, r.y, radius * 0.7, r.color, a * 0.16);
-    }
-    for (const l of this.letters) {
-      const t = 1 - l.life / l.max;
-      const ease = 1 - Math.pow(1 - t, 3);
-      const x = l.fromX + (l.toX - l.fromX) * ease;
-      const y = l.fromY + (l.toY - l.fromY) * ease - Math.sin(ease * Math.PI) * 60;
-      g.save();
-      g.globalAlpha = clamp(1 - t * 0.4, 0, 1);
-      glow(g, x, y, 22, l.color, 0.5);
-      g.fillStyle = '#f4ecd8';
-      g.beginPath();
-      g.roundRect(x - 13, y - 13, 26, 26, 6);
-      g.fill();
-      g.fillStyle = '#1b1a17';
-      g.font = '800 17px Archivo, sans-serif';
-      g.textAlign = 'center';
-      g.textBaseline = 'middle';
-      g.fillText(l.letter, x, y + 1);
-      g.restore();
     }
   }
 

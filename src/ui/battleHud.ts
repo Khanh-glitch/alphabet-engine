@@ -633,9 +633,11 @@ function letterFlights(g: Ctx, flights: readonly HudFlight[]): void {
     // pasted.
     const y = f.fromY + (f.toY - f.fromY) * ease - Math.sin(ease * Math.PI) * 54;
     const size = clamp(f.size * (0.72 + ease * 0.28), 20, 60);
+    // Quadratic fade-in: a tile crossing a *different* card must not read as
+    // having landed in it, which is exactly what a linear ramp looked like.
     tile(g, x - size / 2, y - size / 2, size, f.char, 'filled', {
-      alpha: 0.4 + ease * 0.6,
-      glow: ease > 0.75 ? C.gold : undefined,
+      alpha: 0.3 + ease * ease * 0.7,
+      glow: ease > 0.85 ? C.gold : undefined,
     });
   }
 }

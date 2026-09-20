@@ -23,6 +23,7 @@ import {
   LETTER_FLIGHT,
   BAGBOX,
   TRAY,
+  WILD_RECT,
   type HudFlight,
 } from '../battleHud';
 import type { Battle } from '../../battle/battle';
@@ -132,6 +133,20 @@ export function createBattleScreen(): Screen {
             char: ev.letter,
             fromX: BAGBOX.x + BAGBOX.w - 40,
             fromY: BAGBOX.y + BAGBOX.h / 2,
+            toX: dest.x,
+            toY: dest.y,
+            size: dest.size,
+            t: 0,
+            z: flightZ++,
+          });
+        } else if (ev.kind === 'wildcard') {
+          // Brief 3.3: the substitution must move into the missing socket rather
+          // than mutate the recipe invisibly.
+          const dest = destinationOf(battle, ev.slot, ev.socket);
+          flights.push({
+            char: '?',
+            fromX: WILD_RECT.x + WILD_RECT.w / 2,
+            fromY: WILD_RECT.y + WILD_RECT.h / 2,
             toX: dest.x,
             toY: dest.y,
             size: dest.size,

@@ -27,6 +27,18 @@ It did not match this brief. The gaps that mattered:
 | Cascades | a damage combo counter | the core loop (chain ×2–×9 observed) |
 | Intervention | several abilities bound to flux | one wildcard `?` |
 
+
+## V2 rework in progress
+
+A large gameplay rework is underway against `docs/GAMEPLAY_REWORK_V2.md`, which
+replaces the abstract shared pool with visible recipe sockets, adds Focus and
+Target Mark as steering mechanics, and replaces the timer-based chain with true
+causal provenance. Status per phase: `docs/V2_STATUS.md`.
+
+Only phase V2.0 (baseline) and V2.1 (socket domain model) are complete. The
+playable build is intentionally unchanged so far — the socket model exists,
+is fully tested, and is not yet wired into the simulation.
+
 ## Working
 
 - **Onboarding**: a four-step "how to play" panel, auto-shown before the first

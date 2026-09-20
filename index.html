@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <meta name="theme-color" content="#080a12" />
+    <meta name="color-scheme" content="dark" />
+    <title>Alphabet Engine</title>
+    <style>
+      @font-face { font-family: 'Grotesk'; src: url('./fonts/sg-500.woff2') format('woff2'); font-weight: 500; font-display: block; }
+      @font-face { font-family: 'Grotesk'; src: url('./fonts/sg-700.woff2') format('woff2'); font-weight: 700; font-display: block; }
+      @font-face { font-family: 'Mono'; src: url('./fonts/jb-500.woff2') format('woff2'); font-weight: 500; font-display: block; }
+      @font-face { font-family: 'Mono'; src: url('./fonts/jb-700.woff2') format('woff2'); font-weight: 700; font-display: block; }
+      @font-face { font-family: 'Slab'; src: url('./fonts/bt-800.woff2') format('woff2'); font-weight: 800; font-display: block; }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body {
+        width: 100%; height: 100%; overflow: hidden; background: #080a12;
+        -webkit-tap-highlight-color: transparent; overscroll-behavior: none;
+      }
+      #stage {
+        position: fixed; inset: 0; display: block; width: 100%; height: 100%;
+        touch-action: none; cursor: default;
+      }
+      #boot {
+        position: fixed; inset: 0; display: grid; place-items: center;
+        background: #080a12; color: #2c3350; font: 500 13px/1 'Mono', ui-monospace, monospace;
+        letter-spacing: 0.42em; text-transform: uppercase; transition: opacity 0.5s ease;
+      }
+      #boot.gone { opacity: 0; pointer-events: none; }
+    </style>
+  </head>
+  <body>
+    <canvas id="stage"></canvas>
+    <div id="boot">Alphabet Engine</div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

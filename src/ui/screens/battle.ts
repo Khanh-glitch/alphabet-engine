@@ -164,6 +164,10 @@ export function createBattleScreen(): Screen {
             size: dest.size,
             t: 0,
             z: flightZ++,
+            // Provenance, not a timer: this tile exists because a specific craft
+            // the player made killed a specific enemy.
+            continuesChain: ev.fromBlueprint !== null,
+            fromWord: ev.fromBlueprint ?? undefined,
           });
         }
         switch (ev.kind) {

@@ -72,6 +72,17 @@ export interface HudFlight {
   t: number;
   /** Depth on z, so a carrier drop draws over a bag draw if they overlap. */
   z: number;
+  /**
+   * Set when this letter descends from an earlier craft — the provenance graph
+   * says a weapon the player built caused the kill that freed it.
+   *
+   * This is what makes the cascade legible without a debug panel (brief 3.5 /
+   * test F): the tile visibly belongs to the chain rather than merely arriving
+   * soon after something else.
+   */
+  continuesChain?: boolean;
+  /** The word whose object caused the kill, shown under a chain tile. */
+  fromWord?: string;
 }
 
 const STRIP: Rect = { x: 60, y: 14, w: 580, h: 68 };
@@ -633,12 +644,34 @@ function letterFlights(g: Ctx, flights: readonly HudFlight[]): void {
     // pasted.
     const y = f.fromY + (f.toY - f.fromY) * ease - Math.sin(ease * Math.PI) * 54;
     const size = clamp(f.size * (0.72 + ease * 0.28), 20, 60);
+    if (f.continuesChain) glow(g, x, y, size * 1.5, C.violet, 0.4);
     // Quadratic fade-in: a tile crossing a *different* card must not read as
     // having landed in it, which is exactly what a linear ramp looked like.
     tile(g, x - size / 2, y - size / 2, size, f.char, 'filled', {
       alpha: 0.3 + ease * ease * 0.7,
       glow: ease > 0.85 ? C.gold : undefined,
     });
+    if (f.continuesChain) {
+      // A link ring marks the tile as a cascade link rather than a fresh draw,
+      // and naming the source word answers "where did that come from?" directly.
+      g.save();
+      g.strokeStyle = rgba(C.violet, 0.5 + ease * 0.45);
+      g.lineWidth = 2;
+      g.setLineDash([4, 3]);
+      g.beginPath();
+      g.arc(x, y, size * 0.78, 0, Math.PI * 2);
+      g.stroke();
+      g.restore();
+      if (f.fromWord && ease > 0.3) {
+        label(g, f.fromWord, x, y + size * 0.8 + 13, {
+          size: T.micro,
+          color: rgba(C.violet, 0.6 + ease * 0.35),
+          align: 'center',
+          weight: 800,
+          tracking: 1,
+        });
+      }
+    }
   }
 }
 

@@ -19,6 +19,7 @@ import { Battle } from '../src/battle/battle';
 import { BLUEPRINTS } from '../src/content/blueprints';
 import { KITS } from '../src/content/kits';
 import { encountersFor, type RunMode } from '../src/content/encounters';
+import { TUNE } from '../src/content/tuning';
 
 type BotMode = 'passive' | 'steer' | 'steer-nomark';
 
@@ -37,6 +38,9 @@ interface Totals {
   contested: number;
   maxDepth: number;
   wildcardsUsed: number;
+  /** Mean machine speed multiplier actually experienced (brief line 2285). */
+  momentum: number;
+  momentumSamples: number;
 }
 
 const empty = (): Totals => ({
@@ -54,6 +58,8 @@ const empty = (): Totals => ({
   contested: 0,
   maxDepth: 0,
   wildcardsUsed: 0,
+  momentum: 0,
+  momentumSamples: 0,
 });
 
 /**
@@ -87,6 +93,8 @@ function playRun(mode: BotMode, kitId: string, seed: number, encounters: RunMode
     for (let i = 0; i < 120 * 30; i++) {
       if (battle.state === 'cleared' || battle.state === 'failed') break;
       battle.update(1 / 120);
+      t.momentum += battle.momentum;
+      t.momentumSamples += 1;
       if (mode !== 'passive' && i % 20 === 0) steer(battle, mode === 'steer', t);
     }
     if (battle.state === 'cleared') t.clears += 1;
@@ -153,6 +161,9 @@ const arg = (name: string, fallback: string): string => {
   return hit ? hit.slice(name.length + 3) : fallback;
 };
 
+// A/B switch the brief asks for (8.3): "do not assume faster is better".
+if (arg('momentum', 'on') === 'off') TUNE.momentum.ladder = TUNE.momentum.ladder.map(() => 1);
+
 const runs = Number(arg('runs', '8'));
 const kitId = arg('kit', 'v2test');
 const mode: RunMode = arg('set', 'v2test') === 'standard' ? 'standard' : 'v2test';
@@ -160,7 +171,7 @@ const modes: BotMode[] = ['passive', 'steer-nomark', 'steer'];
 
 console.log(`bots: kit=${kitId} set=${mode} runs=${runs} (${encountersFor(mode).length} encounters each)`);
 console.log(
-  'bot           crafts  combat-fed  kills  letters  coreLost  seconds  clears  marks  markKills  maxChain',
+  'bot           crafts  combat-fed  kills  letters  coreLost  seconds  clears  marks  markKills  maxChain  mom',
 );
 const results: Record<string, Totals> = {};
 for (const m of modes) {
@@ -173,7 +184,8 @@ for (const m of modes) {
   const f = (n: number, d = 1) => (n / runs).toFixed(d).padStart(6);
   console.log(
     `${m.padEnd(13)} ${f(acc.crafts)}  ${f(acc.combatFed)}      ${f(acc.kills)}  ${f(acc.lettersRecovered)}  ` +
-      `${f(acc.coreLost)}  ${f(acc.seconds)}  ${f(acc.clears)}  ${f(acc.marks)}  ${f(acc.markedKills)}  ${f(acc.maxDepth)}`,
+      `${f(acc.coreLost)}  ${f(acc.seconds)}  ${f(acc.clears)}  ${f(acc.marks)}  ${f(acc.markedKills)}  ` +
+      `${f(acc.maxDepth)}  x${(acc.momentum / Math.max(1, acc.momentumSamples)).toFixed(3)}`,
   );
 }
 

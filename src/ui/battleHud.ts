@@ -431,11 +431,23 @@ function bagBox(g: Ctx, battle: Battle, time: number): void {
   // cascade, so it gets a moment of light rather than passing silently.
   const since = Math.min(1, Math.max(0, (time - battle.cycleAt) / 0.9));
   const pulse = since < 1 ? 1 - since : 0;
-  label(g, `${H.cycle} ${battle.bag.cycleIndex + 1}`, BAGBOX.x + 14, BAGBOX.y + 40, {
+  const cycleText = `${H.cycle} ${battle.bag.cycleIndex + 1}`;
+  label(g, cycleText, BAGBOX.x + 14, BAGBOX.y + 40, {
     size: T.tiny,
     color: C.dim,
     weight: 700,
   });
+  // Momentum readout, shown only while it is actually doing something. It sits
+  // next to the bag because that is the thing it speeds up, and it is silent at
+  // 1.00x so it cannot become permanent furniture.
+  if (battle.momentum > 1.015) {
+    const mx = BAGBOX.x + 14 + measure(g, cycleText, { size: T.tiny, weight: 700 }) + 10;
+    label(g, `⚡×${battle.momentum.toFixed(2)}`, mx, BAGBOX.y + 40, {
+      size: T.tiny,
+      color: C.violet,
+      weight: 800,
+    });
+  }
   label(g, `${remain}/${total}`, BAGBOX.x + BAGBOX.w - 14, BAGBOX.y + 40, {
     size: T.small,
     color: C.ink,
@@ -712,7 +724,6 @@ export interface HudOptions {
   eligible: number[];
   hoveredSlot: number | null;
   speed: number;
-  chainActive: boolean;
   chainPulse: number;
   waveIndex: number;
   waveTotal: number;
@@ -763,7 +774,9 @@ export function drawHud(g: Ctx, ui: Ui, battle: Battle, opts: HudOptions): void 
   reserveTray(g, battle, opts.time);
   wildcard(g, ui, battle, opts.time, inter);
   encounterStrip(g, battle, opts.waveIndex, opts.waveTotal);
-  chainBox(g, battle, battle.chain >= 2 && opts.chainActive, opts.chainPulse);
+  // The chain indicator is driven by the causal chain itself, so it stays lit as
+  // long as the cascade is actually alive and goes out when it dies (brief 8.4).
+  chainBox(g, battle, battle.chain >= 2, opts.chainPulse);
   if (opts.flights && opts.flights.length > 0) letterFlights(g, opts.flights);
 
   // Controls: speed and pause, plus the run's position.

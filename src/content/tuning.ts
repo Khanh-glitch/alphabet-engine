@@ -7,6 +7,41 @@
  */
 export const TUNE = {
   /**
+   * V2 cascade momentum (rework brief 8.3 / 8.4).
+   *
+   * A deeper causal cascade makes the machine itself run faster — nothing here
+   * multiplies damage. The brief allows letter travel, recipe lock speed or the
+   * bag interval; the bag interval is the pulse of the whole engine, so it is the
+   * one lever used and no second speed bonus is stacked on top.
+   *
+   * The brief's hypothesis ladder (depth 2 -> 1.05x, 3 -> 1.10x, 4 -> 1.15x,
+   * 5+ -> 1.20x) was tested with `npm run bots` and averaged only x1.014 on the
+   * evaluation set, because 64% of crafts are depth 1. It was invisible. Sweeping
+   * the multiplier gives a clear curve — mean machine speed, then the steer bot's
+   * gain over the passive bot, which is the check for RISK E (momentum turning
+   * the game into an autoplay):
+   *
+   *   x1.000  crafts 23.6  coreLost 120.6  steer +13.2% crafts
+   *   x1.020  crafts 24.1  coreLost 121.6  steer +14.2% crafts
+   *   x1.112  crafts 25.8  coreLost 112.5  steer +14.0% crafts   <- shipped
+   *   x1.237  crafts 27.8  coreLost  99.0  steer +13.6% crafts
+   *   x1.354  crafts 29.8  coreLost  86.5  steer  +7.5% crafts
+   *   x1.784  crafts 34.9  coreLost  58.7  steer  +8.3% crafts
+   *
+   * Up to about x1.24 the reward is felt and steering still decides the outcome.
+   * Past x1.35 the skill gap collapses: raw machine speed substitutes for routing
+   * decisions, which is the failure mode the brief warns about. The ladder below
+   * keeps a gradient by causal depth and caps at the top of the brief's band.
+   *
+   * `grace` is the presentation tail after the last causal event of a chain.
+   * Section 8.4 requires momentum to end when the cascade ends and is explicit
+   * that this must not be the old bag-cycle timer; the chain's own object being
+   * alive, or a kill it caused having just landed, are the only things that hold
+   * it open.
+   */
+momentum: { ladder: [1, 1.12, 1.18, 1.24, 1.30, 1.30], ease: 2.5, grace: 1.4 },
+
+  /**
    * V2 reserve capacity (brief 3.1.2 hypothesises 4-6). Deliberately here rather
    * than hardcoded: the brief says not to finalize it before playtesting.
    */
@@ -29,12 +64,6 @@ export const TUNE = {
   coreHp: 100,
   wildcardCharges: 1,
 
-  /**
-   * Chain bookkeeping. A cascade is a run of crafts fed by combat drops, so the
-   * chain survives as long as crafts keep landing inside this window, and breaks
-   * when the pool goes quiet or a fresh bag cycle starts.
-   */
-  chainWindow: 2.2,
 
   /** Craft loop guard — protects against recursive completion explosions. */
   maxCraftsPerTick: 24,

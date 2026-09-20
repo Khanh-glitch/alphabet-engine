@@ -10,7 +10,6 @@ import { label, plate, rgba, rr, tile, type Ctx } from '../../core/draw';
 import { loc, t } from '../../core/i18n';
 import { sfx } from '../../core/audio';
 import { store } from '../../core/save';
-import { TUNE } from '../../content/tuning';
 
 
 import { FxLayer } from '../../render/fx';
@@ -308,7 +307,6 @@ export function createBattleScreen(): Screen {
         eligible,
         hoveredSlot: null,
         speed: app.speed,
-        chainActive: time - battle.lastCraftAt < TUNE.chainWindow,
         chainPulse: Math.max(0, 1 - (time - battle.lastCraftAt) / 1.2),
         waveIndex: (app.run?.state.encounterIndex ?? 0) + 1,
         waveTotal: app.run?.encounters.length ?? 1,

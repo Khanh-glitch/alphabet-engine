@@ -44,6 +44,20 @@ to; the wildcard resolves a specific visible socket and travels there; enemies
 can be marked and BEE hunts the mark first. `fx.ts`'s old V1 flying-letter system
 was deleted rather than left running alongside the new one.
 
+**V2.6–V2.7, V2.9 landed.** The causal cascade is now visible (a chained letter
+carries a link mark and the name of the word that produced it) and it drives the
+machine: a deeper craft speeds up the bag interval, and the chain — and the speed
+— end when the cascade's own object dies, not on a timer. V1's `chainWindow` and
+the HUD's timer-based chain flag are deleted, so there is one authority for what
+a cascade is.
+
+**V2.9 landed:** a purpose-built three-encounter evaluation set (`BỘ THỬ V2`),
+with no machine rules, no attrition and no reward screens between fights, plus
+`npm run bots` — three bots (passive, steer, steer-without-mark) so each steering
+mechanic can be shown to matter instead of assumed to. The tooling immediately
+paid for itself: it showed the brief's own hypothesis bag made Focus worth
++1.4 %, and that Mark currently moves crafts by ~1 %. See `docs/V2_AUDIT.md`.
+
 **V2.2 landed:** one source of truth for letter state. `Battle.pool` is gone,
 replaced by `Battle.machine`; every letter — bag draw, carrier drop, wildcard,
 rule injection, refund — enters through a single `feed()` gate, which is what

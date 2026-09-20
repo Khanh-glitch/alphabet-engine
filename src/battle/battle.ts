@@ -137,6 +137,24 @@ export class Battle {
    * intention, not as an order the machine must obey.
    */
   markedId = -1;
+  /**
+   * Current machine speed multiplier from cascade momentum (brief 8.3).
+   *
+   * Eased toward the depth-derived target rather than snapped, so the engine
+   * spinning up reads as acceleration instead of a jolt. Never below 1: momentum
+   * is a reward, and a chain ending should not slow the machine below its base
+   * rate, which would punish the player for something they cannot control.
+   */
+  momentum = 1;
+  /**
+   * The object created by the newest craft, i.e. the chain's live continuation.
+   * Momentum holds while it exists, or while kills it caused are still landing
+   * (brief 8.4). Not a timer, and specifically not the bag cycle: a chain that
+   * produced nothing dies even if the bag has not refilled yet.
+   */
+  private chainObjectNode: number | null = null;
+  /** Time of the last causal event inside the current chain. */
+  private chainPulseAt = -99;
 
   constructor(cfg: BattleConfig) {
     this.cfg = cfg;
@@ -436,6 +454,10 @@ export class Battle {
 
     this.chain = depth;
     this.lastCraftAt = this.time;
+    // A new craft starts a new continuation; the previous object no longer holds
+    // the chain open just because it is still on the field.
+    this.chainObjectNode = null;
+    this.chainPulseAt = this.time;
     this.bestChain = Math.max(this.bestChain, depth);
     this.fireCraftHooks(bp);
     const chars = letters.map((l) => l.char);
@@ -581,6 +603,20 @@ export class Battle {
       if (this.pending.length > 0) this.v2.beatSeconds += dt;
     }
 
+    // A cascade is over when its object is gone and nothing it caused is still
+    // landing, so the chain falls back to depth 1. Causal, not timed (brief 8.4).
+    if (this.chain > 1) {
+      const objectAlive =
+        this.chainObjectNode !== null &&
+        this.entities.some((e) => e.alive && this.entityProvenance.get(e.id) === this.chainObjectNode);
+      if (!objectAlive && this.time - this.chainPulseAt > TUNE.momentum.grace) this.chain = 1;
+    }
+
+    // Momentum follows causal depth, eased. Depth 1 is base speed by definition.
+    const ladder = TUNE.momentum.ladder;
+    const target = ladder[Math.min(Math.max(0, this.chain), ladder.length - 1)];
+    this.momentum += (target - this.momentum) * Math.min(1, dt * TUNE.momentum.ease);
+
     this.stepSpawner();
     this.stepBag(dt);
     this.stepCrafts(dt);
@@ -668,7 +704,9 @@ export class Battle {
   private stepBag(dt: number): void {
     this.drawTimer -= dt;
     if (this.drawTimer > 0) return;
-    this.drawTimer = TUNE.drawInterval;
+    // The bag runs faster while a cascade is alive. This is the whole of
+    // momentum: one lever, no damage multiplication (brief 8.3).
+    this.drawTimer = TUNE.drawInterval / this.momentum;
     const result = this.bag.draw();
     if (result.cycleStart) {
       this.cycleAt = this.time;
@@ -713,10 +751,12 @@ export class Battle {
     const entity = this.createEntity(craft.blueprint, craft.lane);
     // The object inherits the craft's ancestry, so anything it kills — and any
     // letter that kill releases — belongs to the same causal chain.
-    this.entityProvenance.set(
-      entity.id,
-      this.provenance.object(craft.provenance, this.time, craft.blueprint),
-    );
+    const objectNode = this.provenance.object(craft.provenance, this.time, craft.blueprint);
+    this.entityProvenance.set(entity.id, objectNode);
+    // The object is the chain's continuation, and this is the causal event that
+    // keeps momentum alive (brief 8.4).
+    this.chainObjectNode = objectNode;
+    this.chainPulseAt = this.time;
     this.emit({
       kind: 'materialise',
       blueprint: craft.blueprint,
@@ -1256,10 +1296,14 @@ export class Battle {
     this.killsThisEncounter += 1;
     // The kill is caused by whichever object last dealt this damage, so the
     // letter it releases can be traced back to the craft that made that object.
-    const killNode = this.provenance.kill(
-      this.time,
-      this.damageSource !== null ? this.entityProvenance.get(this.damageSource) : undefined,
-    );
+    const killerNode =
+      this.damageSource !== null ? this.entityProvenance.get(this.damageSource) : undefined;
+    const killNode = this.provenance.kill(this.time, killerNode);
+    // A kill caused by the chain's own object is what keeps the chain alive: the
+    // player watches the cascade continue, so momentum should still be running.
+    if (killerNode !== undefined && killerNode === this.chainObjectNode) {
+      this.chainPulseAt = this.time;
+    }
     if (enemy.carry) {
       const a = this.feed(
         enemy.carry,
@@ -1359,6 +1403,8 @@ export class Battle {
     cycle: number;
     wildcards: number;
     enemies: number;
+    /** Machine speed multiplier from cascade momentum. */
+    momentum: number;
   } {
     return {
       corePct: this.maxCoreHp > 0 ? this.coreHp / this.maxCoreHp : 0,
@@ -1368,6 +1414,7 @@ export class Battle {
       cycle: this.bag.cycleIndex,
       wildcards: this.wildcardsLeft,
       enemies: this.enemies.filter((e) => !e.dead).length,
+      momentum: this.momentum,
     };
   }
 }

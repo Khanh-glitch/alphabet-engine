@@ -5,7 +5,37 @@ described in terms of behaviour; internal notes say *why*.
 
 ---
 
-## Unreleased — clarity and presentation pass
+## Unreleased — gameplay specification and audit
+
+### Added
+
+- **`docs/GAMEPLAY.md`** — a full gameplay specification written against the
+  shipped code: the loop, the alphabet economy, all 10 blueprints, all 5 enemy
+  archetypes, combat maths, cascades, all 8 encounters, all 3 kits, all 9 machine
+  rules, the run structure and the HUD. Every number is read from source and
+  cited with `file:line`. It ends with an audit section listing every
+  inconsistency found between what the game *says* and what it *does*.
+
+### Fixed
+
+- **"Opening volley" was about 5x stronger than its own text.** The rule
+  advertises *"the first kill of each encounter drops triple letters"*, but the
+  implementation had no first-kill guard at all and fired on **every** carrier
+  kill — around 10.3 duplicated letters per encounter instead of 2. The hook
+  payload (`KillHookEvent`) had no kill index, so the rule was not even
+  *expressible* as described. `killIndex` added; the rule now fires once per
+  encounter, as its Vietnamese and English text both promise.
+- **Anything standing in fire rendered as a solid white blob.** `damageEnemy`
+  added a flat `+0.25` to `hitFlash` on *every* call, including the per-frame
+  damage-over-time ticks. Since `hitFlash` only decays 3/s, it saturated at 1.0
+  permanently, and the renderer paints white above 0.4 — so burning enemies were
+  white, hiding their own burning animation. Damage-over-time now passes
+  `{ pulse: false }`. Measured: 18/18 burning samples were white before; 0/8313
+  after.
+- **The balance report divided by the wrong number.** `tools/harness.ts`
+  reported "encounter seconds" as total time / 7, but a run has 8 encounters and
+  most runs end early. Per-encounter pacing was inflated ~14%. It now divides by
+  the fights actually played; the honest figure is 16.36 s, not 17.16 s.
 
 ### Added
 

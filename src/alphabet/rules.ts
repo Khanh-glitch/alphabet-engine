@@ -32,6 +32,14 @@ export interface KillHookEvent {
   /** True when the dead enemy was a letter carrier. */
   carrier: boolean;
   letters: Letter[];
+  /**
+   * 1-based index of this kill within the encounter.
+   *
+   * Without it a rule cannot express "the first kill" — which is exactly the
+   * behaviour `firstKillTriple` advertises, and why that rule used to fire on
+   * every single carrier kill instead.
+   */
+  killIndex: number;
   /** Duplicate a recovered letter before it settles in the pool. */
   duplicate: (letter: Letter) => void;
 }

@@ -235,6 +235,7 @@ async function main(): Promise<void> {
       craftsPerSecond: [] as number[],
       minCorePct: [] as number[],
       clearedEncounter: [] as number[],
+      fightsPerRun: [] as number[],
       byBlueprint: {} as Record<string, number>,
     };
 
@@ -282,6 +283,10 @@ async function main(): Promise<void> {
       const totalSeconds = report.reduce((a, e) => a + (e.seconds as number), 0);
       const totalCrafts = report.reduce((a, e) => a + (e.crafts as number), 0);
       agg.seconds.push(totalSeconds);
+      // Per-encounter averages must divide by the fights actually played. A run
+      // that ends on encounter 4 has 4 fights' worth of seconds; dividing by a
+      // fixed 7 (or 8) silently inflates the pacing number.
+      agg.fightsPerRun.push(Math.max(1, report.length));
       agg.crafts.push(totalCrafts);
       agg.craftsPerSecond.push(totalCrafts / Math.max(1, totalSeconds));
       const wonPcts = report.filter((e) => e.result === 'cleared').map((e) => e.corePct as number);
@@ -310,8 +315,12 @@ async function main(): Promise<void> {
       console.log(`encounters cleared  : ${stat(agg.clearedEncounter.map(Number))} (of 8)`);
       console.log(`first craft (s)     : ${stat(agg.firstCraft)}   target 2-4`);
       console.log(`longest chain       : ${stat(agg.chains)}   target 2-4 common`);
-      console.log(`encounter seconds   : ${stat(agg.seconds.map((v) => v / 7))}   target 8-15`);
-      console.log(`crafts per encounter: ${stat(agg.crafts.map((v) => v / 7))}`);
+      console.log(
+        `encounter seconds   : ${stat(agg.seconds.map((v, i) => v / agg.fightsPerRun[i]))}   target 8-15`,
+      );
+      console.log(
+        `crafts per encounter: ${stat(agg.crafts.map((v, i) => v / agg.fightsPerRun[i]))}`,
+      );
       console.log(`crafts per second   : ${stat(agg.craftsPerSecond)}`);
       console.log(`closest win core %  : ${stat(agg.minCorePct.map(Number))}`);
       console.log(`crafts by blueprint : ${JSON.stringify(agg.byBlueprint)}`);

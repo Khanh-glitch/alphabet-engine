@@ -55,6 +55,9 @@ export const RULES: MachineRuleDef[] = [
     desc: L('Chữ của kẻ chết đầu tiên trong trận rơi ra gấp ba.', 'The first kill of each encounter drops triple letters.'),
     unique: true,
     onKill: (e) => {
+      // "The first kill of each encounter" — not every kill. The guard is the
+      // whole rule; without it this tripled every carrier drop in the fight.
+      if (e.killIndex !== 1) return;
       if (!e.carrier || e.letters.length === 0) return;
       e.duplicate(e.letters[0]);
       e.duplicate(e.letters[0]);

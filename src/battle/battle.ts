@@ -186,6 +186,7 @@ export class Battle {
       rule.onKill?.({
         carrier,
         letters,
+        killIndex: this.killsThisEncounter,
         duplicate: (letter) => {
           const entry = this.pool.add(letter, 'bonus', this.time);
           this.emit({ kind: 'draw', letter, uid: entry.uid, source: 'bonus' });
@@ -757,7 +758,7 @@ export class Battle {
       if (enemy.dead) continue;
       if (enemy.flying) continue;
       if (Math.abs(enemy.x - ent.x) <= radius) {
-        this.damageEnemy(enemy, TUNE.fire.dps * dt);
+        this.damageEnemy(enemy, TUNE.fire.dps * dt, { pulse: false });
         if (this.rand().chance(dt * 0.6)) {
           enemy.burnT = Math.max(enemy.burnT, 1.4);
           enemy.burnDps = Math.max(enemy.burnDps, TUNE.fire.dps * 0.5);
@@ -861,7 +862,7 @@ export class Battle {
       for (const enemy of this.enemies) {
         if (enemy.dead || enemy.flying) continue;
         if (Math.abs(enemy.x - ent.x) <= TUNE.oil.radius + 20) {
-          this.damageEnemy(enemy, TUNE.oil.burnDps * dt);
+          this.damageEnemy(enemy, TUNE.oil.burnDps * dt, { pulse: false });
           enemy.burnT = Math.max(enemy.burnT, 1.2);
           enemy.burnDps = Math.max(enemy.burnDps, TUNE.oil.burnDps * 0.4);
         }
@@ -898,7 +899,7 @@ export class Battle {
       enemy.hitFlash = Math.max(0, enemy.hitFlash - dt * 3);
       if (enemy.burnT > 0) {
         enemy.burnT -= dt;
-        this.damageEnemy(enemy, enemy.burnDps * dt);
+        this.damageEnemy(enemy, enemy.burnDps * dt, { pulse: false });
         if (enemy.dead) continue;
       }
       if (enemy.freezeT > 0) {
@@ -995,11 +996,21 @@ export class Battle {
 
   // ---- interactions & damage --------------------------------------------
 
-  /** Damage entry point: handles death, letter recovery and hooks. */
-  damageEnemy(enemy: Enemy, amount: number): void {
+  /**
+   * Damage entry point: handles death, letter recovery and hooks.
+   *
+   * `pulse` marks a discrete hit - the kind that should make the unit flash
+   * white for a moment. Damage-over-time must pass `false`: burn ticks arrive
+   * once per frame, and a flat flash increment per tick saturates the flash at
+   * 1.0 forever, so anything standing in fire renders as a solid white blob and
+   * its own burning animation is hidden.
+   */
+  damageEnemy(enemy: Enemy, amount: number, opts: { pulse?: boolean } = {}): void {
     if (enemy.dead) return;
     enemy.hp -= amount;
-    enemy.hitFlash = Math.min(1, enemy.hitFlash + amount / Math.max(1, enemy.maxHp) + 0.25);
+    if (opts.pulse !== false) {
+      enemy.hitFlash = Math.min(1, enemy.hitFlash + amount / Math.max(1, enemy.maxHp) + 0.25);
+    }
     if (enemy.hp > 0) return;
     enemy.dead = true;
     this.telemetry.onKill(!!enemy.carry);

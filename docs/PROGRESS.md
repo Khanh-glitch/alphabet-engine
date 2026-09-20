@@ -63,8 +63,15 @@ It did not match this brief. The gaps that mattered:
 
 ## Known bugs
 
-None outstanding that are reproducible in the harness. Recently fixed and worth
-remembering:
+The audit in `docs/GAMEPLAY.md` §16 lists every discrepancy found between what
+the game displays and what it does. Nine remain open, all of them
+design decisions rather than crashes — dead tuning entries
+(`TUNE.bomb.knockback`, `TUNE.wall.cooldown`, `TUNE.juice.*`, `TUNE.encounterTarget`,
+`TUNE.wildcardCharges`), the five-lane constant duplicated four times, `FIELD.spawnX`
+declared but unused, layout maths leaking into `stepBee`, boss escorts skipping
+chapter scaling, and `bagDuplicate` being implemented identically to `bagAdd`.
+
+Recently fixed and worth remembering:
 
 - `BBOM` printed on cards — recipes now spell their word (`BOMB`).
 - Structural builds (WALL/FAN) could stall an encounter indefinitely; fixed with

@@ -85,3 +85,10 @@ Playable end-to-end: title → kit select → 8 encounters across 4 chapters →
 run summary, with codex, settings, pause and a persisted run. Vietnamese-first
 UI. See `docs/PROGRESS.md` for what is working, what is rough, and the current
 risks — including the documented deviation from the brief's target engine.
+
+## Documentation
+
+- **`docs/GAMEPLAY.md`** — full gameplay specification, written against the
+  shipped code, plus an audit of every place the game disagrees with itself.
+- `docs/GDD.md`, `docs/BALANCE.md`, `docs/UX_UI.md`, `docs/DECISIONS.md` — design record.
+- `AGENTS.md` — rules of engagement for anyone (or anything) changing this repo.

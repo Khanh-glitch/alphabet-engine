@@ -156,6 +156,9 @@ export interface SaveBlob {
 
 const SAVE_KEY = 'ae.run.v2';
 
+/** Clearing this wave completes the run. */
+export const FINAL_WAVE = 20;
+
 const LETTER_FREQ: [string, number][] = [
   ['e', 12.7], ['t', 9.1], ['a', 8.2], ['o', 7.5], ['i', 7.0], ['n', 6.7], ['s', 6.3],
   ['h', 6.1], ['r', 6.0], ['d', 4.3], ['l', 4.0], ['c', 2.8], ['u', 2.8], ['m', 2.4],

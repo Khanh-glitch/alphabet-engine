@@ -193,6 +193,19 @@ export function enemyTile(
     circle(g, x, y, size * 0.95 * pulse);
     g.fillStyle = alpha(C.blood, 0.12);
     g.fill();
+    // name plate so the headline threat is unmistakable
+    const label = e.name.toUpperCase();
+    text(g, label, x, y - size * 0.92, {
+      size: T.micro + 2,
+      weight: 700,
+      color: C.blood,
+      font: F.ui,
+      align: 'center',
+      baseline: 'middle',
+      track: 3,
+      glow: alpha(C.blood, 0.6),
+      glowSize: 12,
+    });
   }
   if (marked) {
     circle(g, x, y, size * (0.86 + 0.05 * Math.sin(o.time * 6)));

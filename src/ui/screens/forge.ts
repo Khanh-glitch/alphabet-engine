@@ -308,14 +308,21 @@ export function createForgeScreen(): Screen {
         y: PREVIEW_BOX.y + PREVIEW_BOX.h - 62,
         w: PREVIEW_BOX.w - 36,
         h: 46,
-        label: `BEGIN WAVE ${run.wave}`,
+        label: run.wave >= 20 ? 'BEGIN FINAL WAVE' : `BEGIN WAVE ${run.wave}`,
         icon: 'play',
         tone: 'primary',
         size: T.body,
         glow: true,
         disabled: !run.placed.length,
         tip: run.placed.length
-          ? { lines: [{ text: `${run.placed.length} weapons mounted. Heads into the next assault.` }] }
+          ? {
+              lines: [
+                { text: `${run.placed.length} weapons mounted.` },
+                ...(run.wave >= 20
+                  ? [{ text: 'Clear this wave to finish the run.', color: C.gold }]
+                  : [{ text: 'Heads into the next assault.' }]),
+              ],
+            }
           : { lines: [{ text: 'Forge at least one weapon first.' }] },
       });
       drawArsenal(g, app, run, isValid(run), melt);
@@ -361,7 +368,7 @@ function drawTopBar(g: Ctx, app: App, run: RunState, wave: ReturnType<typeof pre
   chip(g, {
     x: 132,
     y: TOP_H / 2 - 12,
-    label: wave.note,
+    label: run.wave >= 20 ? 'FINAL WAVE' : wave.note,
     color: wave.boss ? C.blood : wave.elite ? C.rose : C.gold,
     size: T.micro + 1,
   });

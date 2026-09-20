@@ -6,7 +6,7 @@ import { sfx } from '../../core/audio';
 import { Battle, BOX, CORE_X, LANE_H, laneY } from '../../game/battle';
 import { ENEMIES } from '../../game/enemies';
 import { TRAITS } from '../../game/forge';
-import { refillRack, saveRun, salvageMul, type RunState } from '../../game/run';
+import { FINAL_WAVE, refillRack, saveRun, salvageMul, type RunState } from '../../game/run';
 import { button, heading, iconButton, meter } from '../kit';
 import { enemyTile, weaponTower } from '../tiles';
 import type { Fx } from '../../game/types';
@@ -46,6 +46,13 @@ export function createBattleScreen(): Screen {
       run.salvage += earned;
       run.stats.salvageEarned += earned;
       run.stats.wavesCleared++;
+      // clearing the final wave ends the run in victory
+      if (b.wave.index >= FINAL_WAVE) {
+        run.victory = true;
+        run.over = true;
+        saveRun(run);
+        return;
+      }
       run.wave += 1;
       run.eliteNext = false;
       run.salvageBonus = 0;
@@ -85,7 +92,7 @@ export function createBattleScreen(): Screen {
           if (run) {
             endWave(b, run, true);
             sfx.win();
-            app.goto('spoils');
+            app.goto(run.over ? 'summary' : 'spoils');
           }
         }
       } else if (b.phase === 'failed') {
@@ -767,6 +774,16 @@ function drawHud(g: Ctx, app: App, run: RunState, b: Battle, spd: number): void 
     baseline: 'middle',
     track: 1,
   });
+  if (b.wave.index >= FINAL_WAVE) {
+    text(g, 'FINAL WAVE', 300, 54, {
+      size: T.micro,
+      weight: 700,
+      color: C.gold,
+      font: F.num,
+      baseline: 'middle',
+      track: 1.6,
+    });
+  }
   const spawnedPct = b.wave.kinds.length ? b.spawned / b.wave.kinds.length : 1;
   meter(g, { x: 440, y: 22, w: 140, h: 14, pct: spawnedPct, color: C.cyan });
 

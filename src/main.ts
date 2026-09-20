@@ -8,8 +8,7 @@ import { createMarketScreen } from './ui/screens/market';
 import { createShrineScreen } from './ui/screens/shrine';
 import { createSummaryScreen } from './ui/screens/summary';
 import { createHelpScreen } from './ui/screens/help';
-import { Battle } from './game/battle';
-import { applyBoons, previewWave, rngFor } from './game/run';
+import { buildBattle } from './game/setup';
 import { sfx } from './core/audio';
 
 const canvas = document.getElementById('stage') as HTMLCanvasElement | null;
@@ -17,33 +16,14 @@ if (!canvas) throw new Error('missing #stage');
 
 const app = new App(canvas);
 
-// The forge needs to hand a fully built battle to the battle screen. Rather than
-// letting the forge know about battle internals, the app builds it on entry.
+// The battle screen is handed a fully built battle so it never has to know how
+// one is assembled.
 const forgeScreen = createForgeScreen();
 const battleScreen = createBattleScreen();
-
 const withBattleBuild: typeof battleScreen = {
   ...battleScreen,
   enter(a) {
-    const run = a.run;
-    if (run) {
-      const wave = previewWave(run);
-      const rng = rngFor(run, 7);
-      a.battle = new Battle({
-        rng,
-        wave,
-        coreHp: run.core,
-        maxCoreHp: run.maxCore,
-        flux: run.flux,
-        fluxMax: run.fluxMax,
-        weapons: run.placed.map((p) => ({ def: applyBoons(p.def, run), lane: p.lane, slot: p.slot })),
-        engineBonus: 0.8 + run.boons.fluxGain * 0.1,
-        abilityCost: {
-          purge: Math.round(40 * (1 - run.boons.discount)),
-          surge: Math.round(60 * (1 - run.boons.discount)),
-        },
-      });
-    }
+    if (a.run) a.battle = buildBattle(a.run);
     battleScreen.enter?.(a);
   },
   exit(a) {

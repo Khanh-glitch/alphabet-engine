@@ -28,6 +28,7 @@ const COLORS = [C.violet, C.cyan, C.gold, C.lime, C.rose, C.ember];
 export function createShrineScreen(): Screen {
   let picks: Blessing[] = [];
   let taken = false;
+  let leaveT = 0;
   let t = 0;
   let app!: App;
 
@@ -37,11 +38,15 @@ export function createShrineScreen(): Screen {
     taken = true;
     b.apply(run.boons);
     run.blessings.push(b.id);
-    if (b.id === 'husk') run.core = Math.min(run.maxCore, run.core + 18);
+    if (b.id === 'husk') {
+      run.maxCore += 18;
+      run.core = Math.min(run.maxCore, run.core + 18);
+    }
     saveRun(run);
     sfx.levelUp();
     app.toast(`${b.name}  ·  ${b.blurb}`, C.violet);
-    window.setTimeout(() => app.goto('forge'), 260);
+    // a beat to read the flourish, then back to the forge
+    leaveT = 0.5;
   };
 
   return {
@@ -50,6 +55,7 @@ export function createShrineScreen(): Screen {
       app = a;
       t = 0;
       taken = false;
+      leaveT = 0;
       const run = a.run;
       if (!run) return;
       const rng = rngOf(run);
@@ -58,12 +64,17 @@ export function createShrineScreen(): Screen {
     },
     update(dt) {
       t += dt;
+      if (leaveT > 0) {
+        leaveT -= dt;
+        if (leaveT <= 0) app.goto('forge');
+      }
     },
     click(id) {
-      if (id.startsWith('bless:')) {
-        const b = picks.find((p) => p.id === id.slice(6));
-        if (b) choose(b);
-      }
+      // the card and its button both accept the blessing
+      const key = id.startsWith('bless-btn:') ? id.slice(10) : id.startsWith('bless:') ? id.slice(6) : null;
+      if (!key) return;
+      const b = picks.find((p) => p.id === key);
+      if (b) choose(b);
     },
     key(e) {
       if (['1', '2', '3'].includes(e.key)) {

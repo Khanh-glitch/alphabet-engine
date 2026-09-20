@@ -58,7 +58,7 @@ export function createSummaryScreen(): Screen {
       app = a;
       const run = app.run;
       if (!run) return;
-      const win = run.victory && run.over === false;
+      const win = run.victory;
       const p = easeOut(clamp(t / 0.6, 0, 1));
 
       g.fillStyle = '#07080f';
@@ -243,7 +243,7 @@ export function createSummaryScreen(): Screen {
         tone: 'ghost',
         size: T.small,
       });
-      text(g, `SEED  ${run.seedText}`, lx, SIZE.h - 44, {
+      text(g, `SEED  ${run.seedText}`, SIZE.w - 280, SIZE.h - 40, {
         size: T.small,
         weight: 700,
         color: C.faint,

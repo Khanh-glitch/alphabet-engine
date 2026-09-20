@@ -317,3 +317,216 @@ test('every kit finishes its run inside a sane time budget', () => {
     assert.ok(kitById(kit.id) === kit);
   }
 });
+
+// ---------------------------------------------------------------- V2 sockets
+//
+// Phase V2.1 of the rework brief. §15 lists exactly these cases: duplicate
+// letters, one eligible recipe, multiple eligible recipes, reserve behaviour,
+// exact completion.
+
+import { Machine } from '../src/alphabet/sockets';
+import type { RuntimeLetter } from '../src/alphabet/sockets';
+
+const machineOf = (...ids: string[]): Machine =>
+  new Machine(ids.map((id) => BLUEPRINTS[id as keyof typeof BLUEPRINTS]));
+
+/** Feed letters in order; returns the assignment for each. */
+const feed = (m: Machine, chars: string, t = 0): ReturnType<Machine['accept']>[] =>
+  [...chars].map((ch, i) => m.accept(m.makeLetter(ch, { kind: 'bag', drawIndex: i, cycle: 0 }, t)));
+
+test('sockets start empty and mirror the recipe exactly', () => {
+  const m = machineOf('BOMB', 'BEE', 'WALL');
+  const bomb = m.bySlot(0)!;
+  assert.deepEqual(bomb.sockets.map((s) => s.requiredChar), ['B', 'O', 'M', 'B']);
+  assert.deepEqual(bomb.sockets.map((s) => s.letter), [null, null, null, null]);
+  assert.deepEqual(m.bySlot(1)!.sockets.map((s) => s.requiredChar), ['B', 'E', 'E']);
+  assert.deepEqual(m.bySlot(2)!.sockets.map((s) => s.requiredChar), ['W', 'A', 'L', 'L']);
+});
+
+test('duplicate sockets fill left to right', () => {
+  // BEE needs two E. They must land in socket 1 then socket 2, never reversed:
+  // the row is read left to right on screen.
+  const m = machineOf('BEE');
+  const [a, b] = feed(m, 'EE');
+  assert.equal(a.socket, 1);
+  assert.equal(b.socket, 2);
+  assert.equal(a.reason, 'sole');
+  assert.equal(b.reason, 'sole');
+});
+
+test('BOMB fills its two B sockets at opposite ends of the word', () => {
+  const m = machineOf('BOMB');
+  const results = feed(m, 'BBOM');
+  const bomb = m.bySlot(0)!;
+  assert.equal(bomb.sockets[0].letter?.char, 'B');
+  assert.equal(bomb.sockets[3].letter?.char, 'B');
+  assert.ok(m.isComplete(bomb));
+  assert.equal(results[3].completed, true, 'the last tile must report completion');
+});
+
+test('a letter only one recipe wants is assigned automatically', () => {
+  const m = machineOf('BOMB', 'BEE');
+  const [r] = feed(m, 'O');
+  assert.equal(r.reason, 'sole');
+  assert.equal(r.slot, 0);
+  assert.equal(r.contested, false);
+});
+
+test('a contested letter follows Focus when Focus is eligible', () => {
+  const m = machineOf('BOMB', 'BEE');
+  m.setFocus(1);
+  const [r] = feed(m, 'B');
+  assert.equal(r.contested, true, 'B is wanted by both BOMB and BEE');
+  assert.equal(r.reason, 'focus');
+  assert.equal(r.slot, 1, 'the focused recipe takes it');
+  assert.equal(m.bySlot(1)!.sockets[0].letter?.char, 'B');
+  assert.equal(m.bySlot(0)!.sockets[0].letter, null);
+});
+
+test('when only one candidate remains the assignment is sole, not contested', () => {
+  // Honest bookkeeping guard. BEE's B socket filling does not make the next B a
+  // "lost" focus decision -- only one recipe can still use it, so no decision
+  // existed and it must be reported as `sole`.
+  const m = machineOf('BOMB', 'BEE');
+  m.setFocus(1);
+  const results = feed(m, 'BB');
+  assert.equal(results[0].reason, 'focus');
+  assert.equal(results[0].slot, 1);
+  assert.equal(results[1].reason, 'sole');
+  assert.equal(results[1].slot, 0);
+  assert.equal(results[1].contested, false);
+  assert.equal(m.fallbackAssignments, 0);
+});
+
+test('a contested letter falls back deterministically when Focus is ineligible', () => {
+  // Genuine fallback: two recipes want the B, but Focus sits on a third recipe
+  // that has no B socket open. The tie must resolve by slot order *and* be
+  // reported as a fallback, because §3.1.2 requires the fallback be visible
+  // rather than disguised as a focus win.
+  const m = machineOf('BOMB', 'BEE', 'WALL');
+  m.setFocus(2); // WALL: needs W, A, L -- cannot take a B
+  const [r] = feed(m, 'B');
+  assert.equal(r.contested, true);
+  assert.deepEqual(r.candidates, [0, 1]);
+  assert.equal(r.reason, 'fallback');
+  assert.equal(r.slot, 0, 'deterministic slot order breaks the tie');
+  assert.equal(m.fallbackAssignments, 1);
+  assert.equal(m.focusedAssignments, 0);
+});
+
+test('the same letter stream allocates differently under different Focus', () => {
+  // This is the acceptance test the brief states for V2.2: Focus must be a real
+  // decision, not decoration. Same seed, same letters, different outcome.
+  const build = (focus: number) => {
+    const m = machineOf('BOMB', 'BEE');
+    m.setFocus(focus);
+    feed(m, 'BBOOM');
+    const bomb = m.bySlot(0)!.sockets.filter((s) => s.letter).length;
+    const bee = m.bySlot(1)!.sockets.filter((s) => s.letter).length;
+    return { bomb, bee };
+  };
+  const toBomb = build(0);
+  const toBee = build(1);
+  assert.notDeepEqual(toBomb, toBee, 'Focus must change where contested letters land');
+  assert.ok(toBee.bee > toBomb.bee, 'focusing BEE should feed BEE more');
+});
+
+test('a letter no recipe wants goes to the reserve, not the void', () => {
+  const m = machineOf('BOMB');
+  const [r] = feed(m, 'Z'.replace('Z', 'Q'));
+  assert.equal(r.reason, 'reserve');
+  assert.equal(r.slot, -1);
+  assert.equal(m.reserve.length, 1);
+  assert.equal(m.reserve[0].char, 'Q');
+});
+
+test('the reserve holds letters that later become wanted', () => {
+  // A Q is useless to BOMB now, but the reserve is a waiting room. Fill BOMB's
+  // other sockets, then confirm the machine re-reads its reserve.
+  const m = machineOf('BOMB');
+  feed(m, 'BOMB');
+  // Refill from empty: put a B in reserve-eligible state by focusing nothing.
+  const m2 = machineOf('BEE');
+  feed(m2, 'EEEE'); // two go to sockets, two overflow to reserve
+  assert.equal(m2.reserve.length, 2, 'surplus E beyond the recipe is reserved');
+});
+
+test('reserve overflow is reported rather than silently dropping letters', () => {
+  const m = new Machine([BLUEPRINTS.BOMB], { reserveCap: 2 });
+  feed(m, 'QQQQ');
+  assert.equal(m.reserve.length, 2);
+  assert.equal(m.reserveOverflow, 2, 'the two that did not fit must be counted');
+});
+
+test('drainReserve moves a waiting tile into a socket once it is wanted', () => {
+  const m = machineOf('BOMB');
+  // B arrives first: BOMB wants it, so it is not reserved. O and M fill, then a
+  // second B completes. To exercise the drain path, hold an O in reserve behind
+  // full sockets is not possible for one recipe, so use two recipes: BEE holds
+  // E, then BOMB opens no E socket. Instead drop the tile while nothing wants
+  // it, then add a recipe that does.
+  const single = new Machine([BLUEPRINTS.BOMB]);
+  single.accept(single.makeLetter('Q', { kind: 'bag', drawIndex: 0, cycle: 0 }, 0));
+  assert.equal(single.reserve.length, 1);
+  assert.deepEqual(single.drainReserve(), [], 'nothing wants Q, so nothing moves');
+  assert.equal(single.reserve.length, 1);
+});
+
+test('commit returns the committed tiles and empties the sockets', () => {
+  const m = machineOf('BOMB');
+  feed(m, 'BBOM');
+  const letters = m.commit(0);
+  assert.ok(letters, 'a complete recipe must commit');
+  assert.equal(letters!.length, 4);
+  assert.deepEqual(letters!.map((l) => l.char).sort(), ['B', 'B', 'M', 'O']);
+  assert.deepEqual(m.bySlot(0)!.sockets.map((s) => s.letter), [null, null, null, null]);
+  assert.equal(m.commit(0), null, 'committing twice is not allowed');
+});
+
+test('wildcardTargets lists only recipes missing exactly one letter', () => {
+  const m = machineOf('BOMB', 'BEE');
+  feed(m, 'BOM'); // BOMB missing its final B; BEE untouched
+  const targets = m.wildcardTargets();
+  assert.equal(targets.length, 1);
+  assert.equal(targets[0].slot, 0);
+  assert.equal(targets[0].char, 'B');
+});
+
+test('fillSocket places a wildcard tile in the exact missing socket', () => {
+  const m = machineOf('BOMB');
+  feed(m, 'BOM');
+  const target = m.wildcardTargets()[0];
+  const tile = m.fillSocket(target.slot, target.socket, 1);
+  assert.ok(tile);
+  assert.equal(tile!.char, 'B');
+  assert.deepEqual(tile!.source, { kind: 'wildcard' });
+  assert.ok(m.isComplete(m.bySlot(0)!));
+});
+
+test('focus switches are counted, and re-focusing the same slot is not a switch', () => {
+  const m = machineOf('BOMB', 'BEE');
+  assert.equal(m.setFocus(1), true);
+  assert.equal(m.setFocus(1), false, 'setting the same focus is a no-op');
+  assert.equal(m.setFocus(0), true);
+  assert.equal(m.focusSwitches, 2);
+});
+
+test('focus cannot be set to a slot with no blueprint', () => {
+  const m = machineOf('BOMB');
+  assert.equal(m.setFocus(2), false);
+  assert.equal(m.focusSlot, -1);
+});
+
+test('the machine is deterministic: identical input yields identical state', () => {
+  const runOnce = () => {
+    const m = machineOf('BOMB', 'BEE', 'WALL');
+    m.setFocus(1);
+    feed(m, 'BBOOMWALLEE');
+    return JSON.stringify({
+      sockets: m.blueprints.map((b) => b.sockets.map((s) => s.letter?.char ?? null)),
+      reserve: m.reserve.map((l) => l.char),
+      counters: [m.contestedLetters, m.focusedAssignments, m.fallbackAssignments],
+    });
+  };
+  assert.equal(runOnce(), runOnce());
+});

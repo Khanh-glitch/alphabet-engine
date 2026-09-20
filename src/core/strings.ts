@@ -12,6 +12,14 @@ export interface HudStrings {
   emptySlot: string;
   pool: string;
   poolEmpty: string;
+  /** V2: the small buffer for letters no recipe currently wants (brief 3.1.2). */
+  reserve: string;
+  reserveEmpty: string;
+  /** V2: the steering mechanic's label (brief 3.2.3). */
+  focus: string;
+  focusHint: string;
+  mark: string;
+  markHint: string;
   bag: string;
   cycle: string;
   incomingLetters: string;
@@ -37,6 +45,12 @@ const vi: HudStrings = {
   emptySlot: 'Ô TRỐNG',
   pool: 'KHO CHỮ',
   poolEmpty: 'Chưa có chữ nào — chờ túi nhả hoặc hạ kẻ mang chữ',
+  reserve: 'DỰ TRỮ',
+  reserveEmpty: 'Trống — chữ nào công thức cần sẽ tự vào ô',
+  focus: 'ƯU TIÊN',
+  focusHint: 'Bấm thẻ hoặc phím 1 2 3 để máy dồn chữ tranh chấp cho từ này',
+  mark: 'ĐÁNH DẤU',
+  markHint: 'Bấm một kẻ địch để BEE săn nó trước',
   bag: 'TÚI CHỮ',
   cycle: 'Vòng',
   incomingLetters: 'CHỮ SẼ RƠI',
@@ -62,6 +76,12 @@ const en: HudStrings = {
   emptySlot: 'EMPTY SLOT',
   pool: 'LETTER POOL',
   poolEmpty: 'Pool is empty — wait for the bag or kill a carrier',
+  reserve: 'RESERVE',
+  reserveEmpty: 'Empty — a letter goes straight into whichever recipe wants it',
+  focus: 'FOCUS',
+  focusHint: 'Click a card or press 1 2 3 to send contested letters to that word',
+  mark: 'MARK',
+  markHint: 'Click an enemy to make BEE hunt it first',
   bag: 'LETTER BAG',
   cycle: 'Cycle',
   incomingLetters: 'LETTERS STILL COMING',

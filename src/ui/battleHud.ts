@@ -60,22 +60,6 @@ function fit(g: Ctx, text: string, maxW: number, size: number, weight: number): 
   return '…';
 }
 
-/**
- * A recipe position is either covered by the pool or missing. Walking the word
- * left to right marks the earliest positions the pool cannot pay for, so "B O M
- * B" with one B in the pool reads as "⚬ O M B" — no counting required.
- */
-function recipeStates(bp: BlueprintDef, have: Map<string, number>): boolean[] {
-  const pool = new Map(have);
-  return bp.recipe.map((letter) => {
-    const n = pool.get(letter) ?? 0;
-    if (n > 0) {
-      pool.set(letter, n - 1);
-      return true;
-    }
-    return false;
-  });
-}
 
 function blueprintCard(
   g: Ctx,
@@ -104,18 +88,64 @@ function blueprintCard(
   }
 
   const tone = BP_COLOR[bp.id] ?? C.cyan;
-  const have = battle.pool.notes();
-  const covered = recipeStates(bp, have);
+  // V2: the card shows the blueprint's own sockets. Each position is either
+  // occupied by a physical tile or visibly empty, so "what is almost complete"
+  // and "what exact letter is missing" are readable without counting (brief 3.1).
+  const rt = battle.machine.bySlot(slot);
+  const sockets =
+    rt?.sockets ?? bp.recipe.map((requiredChar) => ({ requiredChar, letter: null }));
+  const covered = sockets.map((sk) => sk.letter !== null);
+  const focused = battle.focusSlot === slot;
   const missingCount = covered.filter((c) => !c).length;
   const crafts = battle.telemetry.data.craftsByBlueprint[bp.id] ?? 0;
   const almost = missingCount === 1;
 
   plate(g, r.x, r.y, r.w, r.h, {
     radius: R.md,
-    fill: hovered || (armed && eligible) ? '#1e2a46' : '#151d30',
-    edge: armed && eligible ? C.gold : almost ? rgba(tone, 0.85) : undefined,
+    fill: focused ? '#1c2742' : hovered || (armed && eligible) ? '#1e2a46' : '#151d30',
+    edge: armed && eligible ? C.gold : focused ? tone : almost ? rgba(tone, 0.85) : undefined,
     depth: 5,
   });
+
+  // Focus state. The brief asks for it to be unmistakable without being noisy,
+  // and explicitly not to rely on colour alone — so it is a labelled bracket,
+  // not a tint.
+  if (focused) {
+    const pulse = 0.55 + Math.sin(time * 4) * 0.2;
+    g.strokeStyle = rgba(tone, pulse);
+    g.lineWidth = W.bold + 1;
+    rr(g, r.x - 3, r.y - 3, r.w + 6, r.h + 6, R.md + 3);
+    g.stroke();
+    // Corner brackets: the mechanical "selected" read.
+    const bl = 16;
+    g.strokeStyle = rgba('#ffffff', 0.85);
+    g.lineWidth = 2.5;
+    for (const [cx, cy, dx, dy] of [
+      [r.x - 3, r.y - 3, 1, 1],
+      [r.x + r.w + 3, r.y - 3, -1, 1],
+      [r.x - 3, r.y + r.h + 3, 1, -1],
+      [r.x + r.w + 3, r.y + r.h + 3, -1, -1],
+    ]) {
+      g.beginPath();
+      g.moveTo(cx + dx * bl, cy);
+      g.lineTo(cx, cy);
+      g.lineTo(cx, cy + dy * bl);
+      g.stroke();
+    }
+    // The label sits above the card as a chip: inside the card it would print on
+    // top of the socket row, and the sockets are the thing the player is reading.
+    const chipW = measure(g, H.focus, { size: T.micro, weight: 800, tracking: 2 }) + 22;
+    const chipX = r.x + r.w - chipW;
+    const chipY = r.y - 21;
+    plate(g, chipX, chipY, chipW, 17, { radius: 5, fill: '#12192b', edge: tone, depth: 3 });
+    label(g, H.focus, chipX + chipW / 2, chipY + 12, {
+      size: T.micro,
+      color: tone,
+      align: 'center',
+      weight: 800,
+      tracking: 2,
+    });
+  }
 
   // Progress wash — the card brightens as its recipe fills up.
   const filled = (bp.recipe.length - missingCount) / bp.recipe.length;
@@ -157,13 +187,18 @@ function blueprintCard(
     weight: 800,
     tracking: 2,
   });
-  label(g, loc(bp.name), r.x + 16 + g.measureText(bp.word).width + 42, r.y + r.h - 12, {
+  // Positioned by measurement, never by the ambient canvas font: `g.measureText`
+  // here would read whatever font the previous draw call happened to leave set.
+  const wordW = measure(g, bp.word, { size: T.body, weight: 800, tracking: 2 });
+  label(g, loc(bp.name), r.x + 16 + wordW + 42, r.y + r.h - 12, {
     size: T.small,
     color: tone,
     weight: 700,
   });
-  if (crafts > 0) {
-    label(g, `×${crafts}`, r.x + r.w - 16, r.y + r.h - 12, {
+  const craftLabel = crafts > 0 ? `×${crafts}` : null;
+  const craftW = craftLabel ? measure(g, craftLabel, { size: T.small, weight: 800 }) : 0;
+  if (craftLabel) {
+    label(g, craftLabel, r.x + r.w - 16, r.y + r.h - 12, {
       size: T.small,
       color: C.dim,
       align: 'right',
@@ -177,12 +212,15 @@ function blueprintCard(
     if (!covered[i]) owedCounts.set(letter, (owedCounts.get(letter) ?? 0) + 1);
   });
   const owed = [...owedCounts.entries()].map(([letter, n]) => (n > 1 ? `${letter}×${n}` : letter));
-  const nameEnd = 16 + measure(g, bp.word, { size: T.body, weight: 800, tracking: 2 }) + 42 +
-    measure(g, loc(bp.name), { size: T.small, weight: 700 });
+  // The "still needs" line and the craft counter share the card's bottom-right
+  // corner, so the guard has to reserve the counter's actual width — a bare
+  // "is there room for the text" check let them print on top of each other.
+  const nameEnd = r.x + 16 + wordW + 42 + measure(g, loc(bp.name), { size: T.small, weight: 700 });
   const needText = owed.length > 0 ? `${H.needs} ${owed.join(' ')}` : null;
   const needW = needText ? measure(g, needText, { size: T.small, weight: 800 }) : 0;
-  if (needText && (crafts === 0 || r.x + r.w - 16 - needW > nameEnd + 10)) {
-    label(g, needText, r.x + r.w - 16, r.y + r.h - 12, {
+  const rightLimit = r.x + r.w - 16 - (craftLabel ? craftW + 12 : 0);
+  if (needText && rightLimit - needW > nameEnd + 8) {
+    label(g, needText, rightLimit, r.y + r.h - 12, {
       size: T.small,
       color: rgba(C.gold, 0.95),
       align: 'right',
@@ -206,15 +244,17 @@ function blueprintCard(
     craft.phase === 0 ? craft.t / 0.36 : craft.phase === 1 ? craft.t / 0.2 : craft.t / 0.26;
 
   if (craft.phase === 0) {
-    // Letters converge from the tray onto this card: the game's hero moment.
-    const trayCx = TRAY.x + TRAY.w / 2;
-    const trayCy = TRAY.y + TRAY.h / 2;
+    // The tiles are already sitting in their own sockets, so the hero beat is the
+    // row tightening and lighting up in place rather than letters arriving from
+    // somewhere else. That is the whole point of V2: the player watched each tile
+    // land, so the completion has a cause they already traced.
     craft.letters.forEach((letter, i) => {
       const e = clamp(easeOut(clamp(beat + (craft.letters.length - 1 - i) * 0.07, 0, 1)), 0, 1);
-      const tx = startX + i * (size + gap);
-      const x = trayCx + (tx - trayCx) * e;
-      const y = trayCy + (ty - trayCy) * e - Math.sin(e * Math.PI) * 46;
-      tile(g, x, y, size * (1 - e * 0.08), letter, 'filled', { alpha: 0.35 + e * 0.65 });
+      const lift = Math.sin(e * Math.PI) * 7;
+      tile(g, startX + i * (size + gap), ty - lift, size, letter, 'filled', {
+        alpha: 0.5 + e * 0.5,
+        glow: e > 0.55 ? C.gold : undefined,
+      });
     });
   } else if (craft.phase === 1) {
     // Lock: the word squeezes together into one solid block.
@@ -240,55 +280,50 @@ function blueprintCard(
   }
 }
 
-/** Letter pool tray — the shared alphabet economy. */
-function poolTray(g: Ctx, battle: Battle, time: number): void {
+/**
+ * The reserve tray.
+ *
+ * Deliberately small, and deliberately not the centre of the screen: in V2 a
+ * letter's normal destination is a socket, and this holds only the ones no
+ * recipe currently wants. Capacity pips make the overflow rule visible before it
+ * bites (brief 3.1.2).
+ */
+function reserveTray(g: Ctx, battle: Battle, time: number): void {
   well(g, TRAY.x, TRAY.y, TRAY.w, TRAY.h, R.md);
   // Label lives inside the well, in its own column, so tiles never touch text.
-  label(g, H.pool, TRAY.x + 16, TRAY.y + TRAY.h / 2 + 4, {
+  label(g, H.reserve, TRAY.x + 16, TRAY.y + TRAY.h / 2 + 4, {
     size: T.micro,
     color: C.faint,
     weight: 800,
     tracking: 2,
   });
-  const trayInner = { x: TRAY.x + 96, w: TRAY.w - 96 - 12 };
+  const trayInner = { x: TRAY.x + 118, w: TRAY.w - 118 - 16 };
 
-  const rows = battle.pool.tray();
+  const letters = battle.machine.reserve;
   const size = 42;
   const gap = 7;
-  // Reserve room for the overflow chip whenever the tray would run over.
-  const fullFit = Math.floor((trayInner.w + gap) / (size + gap));
-  const needsOverflow = rows.length > fullFit;
-  const maxFit = needsOverflow ? Math.max(1, fullFit - 1) : fullFit;
-  const shown = rows.slice(0, maxFit);
-  const overflow = rows.length - shown.length;
-  const y = TRAY.y + (TRAY.h - size) / 2 - 4;
+  const y = TRAY.y + (TRAY.h - size) / 2 - 6;
+  // Capacity pips, so "the reserve is nearly full" is readable at a glance.
+  const cap = battle.machine.reserveCap;
+  const pipY = TRAY.y + TRAY.h - 10;
 
-  shown.forEach((row, i) => {
+  letters.forEach((letter, i) => {
     const x = trayInner.x + i * (size + gap);
-    const entry = battle.pool.all().find((e) => e.uid === row.uid);
-    const age = entry ? time - entry.t : 9;
+    const age = time - letter.createdAt;
     const pop = age < 0.3 ? 1 + (0.3 - age) * 1.3 : 1;
-    tile(g, x, y, size, row.letter, 'filled', { scale: pop, press: 0 });
-    if (row.count > 1) {
-      label(g, `×${row.count}`, x + size / 2, y + size - 7, {
-        size: 12,
-        color: C.gold,
-        align: 'center',
-        weight: 800,
-      });
-    }
+    tile(g, x, y, size, letter.char, 'filled', { scale: pop, press: 0 });
   });
 
-  if (overflow > 0) {
-    label(g, `+${overflow}`, TRAY.x + TRAY.w - 14, TRAY.y + TRAY.h / 2 + 5, {
-      size: T.small,
-      color: C.dim,
-      align: 'right',
-      weight: 700,
-    });
+  for (let i = 0; i < cap; i++) {
+    const x = trayInner.x + i * (size + gap) + size / 2;
+    g.fillStyle = i < letters.length ? rgba(C.gold, 0.8) : rgba('#ffffff', 0.16);
+    g.beginPath();
+    g.arc(x, pipY, 2.5, 0, Math.PI * 2);
+    g.fill();
   }
-  if (rows.length === 0) {
-    label(g, H.poolEmpty, TRAY.x + 96 + trayInner.w / 2, TRAY.y + TRAY.h / 2 + 5, {
+
+  if (letters.length === 0) {
+    label(g, H.reserveEmpty, trayInner.x + trayInner.w / 2 - 60, TRAY.y + TRAY.h / 2 + 5, {
       size: T.small,
       color: C.faint,
       align: 'center',
@@ -590,7 +625,7 @@ export function drawHud(g: Ctx, ui: Ui, battle: Battle, opts: HudOptions): void 
   }
   incomingPanel(g, battle);
   bagBox(g, battle, opts.time);
-  poolTray(g, battle, opts.time);
+  reserveTray(g, battle, opts.time);
   wildcard(g, ui, battle, opts.time, inter);
   encounterStrip(g, battle, opts.waveIndex, opts.waveTotal);
   chainBox(g, battle, battle.chain >= 2 && opts.chainActive, opts.chainPulse);

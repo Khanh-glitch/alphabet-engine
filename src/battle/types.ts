@@ -1,5 +1,6 @@
 /** Battlefield entity and event types. Simulation state only — no rendering. */
 import type { BlueprintId, Letter, Tag } from '../alphabet/types';
+import type { AssignmentReason } from '../alphabet/sockets';
 import type { EnemyKindId } from '../content/tuning';
 
 export interface Enemy {
@@ -71,19 +72,41 @@ export interface Entity {
 }
 
 export type BattleEvent =
-  | { kind: 'draw'; letter: Letter; uid: number; source: 'bag' | 'bonus' }
-  | { kind: 'craftStart'; blueprint: BlueprintId; slot: number; letters: Letter[] }
+  | {
+      kind: 'draw';
+      letter: Letter;
+      uid: number;
+      source: 'bag' | 'bonus';
+      /** Socket this tile was routed into, or -1 when it went to the reserve. */
+      slot: number;
+      socket: number;
+      reason: AssignmentReason;
+    }
+  | { kind: 'craftStart'; blueprint: BlueprintId; slot: number; letters: Letter[]; provenance: number }
   | { kind: 'craftLock'; blueprint: BlueprintId; slot: number }
+  | { kind: 'focus'; slot: number }
+  | { kind: 'mark'; enemyId: number }
   | { kind: 'materialise'; blueprint: BlueprintId; entityId: number; x: number; lane: number }
   | { kind: 'explosion'; x: number; y: number; radius: number; color: string; blueprint: BlueprintId }
   | { kind: 'ignite'; x: number; radius: number }
   | { kind: 'push'; x: number; y: number }
   | { kind: 'kill'; x: number; y: number; letter: Letter | null; lane: number }
-  | { kind: 'letterReturn'; letter: Letter; x: number; y: number; uid: number }
+  | {
+      kind: 'letterReturn';
+      letter: Letter;
+      x: number;
+      y: number;
+      uid: number;
+      slot: number;
+      socket: number;
+      reason: AssignmentReason;
+      /** Leaflet: which craft caused the kill that freed this letter, if any. */
+      fromBlueprint: BlueprintId | null;
+    }
   | { kind: 'coreHit'; amount: number }
   | { kind: 'spawn'; kind2: EnemyKindId; x: number; lane: number; id: number }
   | { kind: 'chain'; depth: number }
-  | { kind: 'wildcard'; slot: number; letter: Letter }
+  | { kind: 'wildcard'; slot: number; letter: Letter; socket: number }
   | { kind: 'stalling'; seconds: number }
   | { kind: 'breach'; amount: number; units: number }
   | { kind: 'cleared' }
@@ -96,6 +119,8 @@ export interface PendingCraft {
   slot: number;
   /** Letter tiles consumed, kept for the converge animation. */
   letters: Letter[];
+  /** Provenance node of this craft, so its objects inherit the chain. */
+  provenance: number;
   /** 0 = gathering, 1 = locked, 2 = emerging. */
   phase: 0 | 1 | 2;
   t: number;

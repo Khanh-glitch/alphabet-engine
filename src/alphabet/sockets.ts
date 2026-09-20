@@ -107,7 +107,13 @@ export class Machine {
   private config: MachineConfig;
   private nextLetterId = 1;
 
-  /** Slot the player is steering toward, or -1 when nothing is focused. */
+  /**
+   * Slot the player is steering toward.
+   *
+   * Defaults to the first equipped recipe rather than to nothing: the brief
+   * keeps exactly one Blueprint focused during combat (3.2), and starting with
+   * no focus would hide the mechanic from a player who never clicks a card.
+   */
   focusSlot = -1;
   /** Assignments and their reasons, newest last. Cleared by the caller. */
   readonly log: Assignment[] = [];
@@ -130,6 +136,7 @@ export class Machine {
         sockets: bp.recipe.map((requiredChar) => ({ requiredChar, letter: null })),
       });
     });
+    if (this.blueprints.length > 0) this.focusSlot = this.blueprints[0].slot;
   }
 
   // ---- focus -------------------------------------------------------------

@@ -230,6 +230,19 @@ async function main(): Promise<void> {
       failed: 0,
       firstCraft: [] as number[],
       chains: [] as number[],
+      /** V2: every craft's true causal depth across the batch (brief 12.4). */
+      causalDepths: [] as number[],
+      bagOnly: 0,
+      combatFed: 0,
+      contested: 0,
+      focusInfluenced: 0,
+      fallback: 0,
+      focusSwitches: 0,
+      marks: 0,
+      markedKills: 0,
+      lettersFromMarked: 0,
+      wildcards: 0,
+      reserveOverflow: 0,
       seconds: [] as number[],
       crafts: [] as number[],
       craftsPerSecond: [] as number[],
@@ -266,6 +279,14 @@ async function main(): Promise<void> {
           lettersRecovered: t.lettersRecovered,
           wildcardsUsed: t.wildcardsUsed,
           byBlueprint: t.craftsByBlueprint,
+          v2: battle.v2,
+          machine: {
+            contested: battle.machine.contestedLetters,
+            focusInfluenced: battle.machine.focusedAssignments,
+            fallback: battle.machine.fallbackAssignments,
+            focusSwitches: battle.machine.focusSwitches,
+            reserveOverflow: battle.machine.reserveOverflow,
+          },
         });
         if (battle.state === 'failed' || run.finished) break;
         // A naive player: take the first offer. Deliberately not optimal, so the
@@ -294,6 +315,20 @@ async function main(): Promise<void> {
       for (const e of report) {
         if (e.firstCraft !== null && e.firstCraft !== undefined) agg.firstCraft.push(e.firstCraft as number);
         if ((e.longestChain as number) > 0) agg.chains.push(e.longestChain as number);
+        const v2 = e.v2 as Record<string, any>;
+        const m = e.machine as Record<string, number>;
+        agg.causalDepths.push(...(v2.chainLengths as number[]));
+        agg.bagOnly += v2.bagOnlyCrafts as number;
+        agg.combatFed += v2.combatFedCrafts as number;
+        agg.marks += v2.marksPlaced as number;
+        agg.markedKills += v2.markedKills as number;
+        agg.lettersFromMarked += v2.lettersFromMarked as number;
+        agg.wildcards += v2.wildcardsUsed as number;
+        agg.contested += m.contested;
+        agg.focusInfluenced += m.focusInfluenced;
+        agg.fallback += m.fallback;
+        agg.focusSwitches += m.focusSwitches;
+        agg.reserveOverflow += m.reserveOverflow;
         for (const [k, v] of Object.entries(e.byBlueprint as Record<string, number>)) {
           agg.byBlueprint[k] = (agg.byBlueprint[k] ?? 0) + (v as number);
         }
@@ -314,7 +349,31 @@ async function main(): Promise<void> {
       console.log(`kit=${kitId} runs=${agg.runs} completed=${agg.cleared} failed=${agg.failed}`);
       console.log(`encounters cleared  : ${stat(agg.clearedEncounter.map(Number))} (of 8)`);
       console.log(`first craft (s)     : ${stat(agg.firstCraft)}   target 2-4`);
-      console.log(`longest chain       : ${stat(agg.chains)}   target 2-4 common`);
+      console.log(`longest chain (V1)  : ${stat(agg.chains)}   target 2-4 common`);
+      // V2: the causal cascade, which is a different and stricter measurement.
+      const depthHist: Record<number, number> = {};
+      for (const d of agg.causalDepths) depthHist[d] = (depthHist[d] ?? 0) + 1;
+      const pct = (n: number) => (agg.causalDepths.length ? ((n / agg.causalDepths.length) * 100).toFixed(0) : '0');
+      console.log(
+        `causal depth        : ${stat(agg.causalDepths)}  max=${Math.max(0, ...agg.causalDepths)}  ` +
+          `[${Object.entries(depthHist)
+            .map(([d, n]) => `${d}:${n}(${pct(n)}%)`)
+            .join(' ')}]`,
+      );
+      console.log(
+        `crafts bag-only/combat-fed : ${pct(agg.bagOnly)}% / ${pct(agg.combatFed)}%  ` +
+          `(n=${agg.bagOnly + agg.combatFed})`,
+      );
+      console.log(
+        `focus               : contested/enc=${stat(
+          [agg.contested / Math.max(1, agg.fightsPerRun.reduce((a, b) => a + b, 0))],
+        )}  ` +
+          `focus-won=${agg.focusInfluenced} fallback=${agg.fallback} switches=${agg.focusSwitches}`,
+      );
+      console.log(
+        `marks               : placed=${agg.marks} markedKills=${agg.markedKills} lettersFromMarked=${agg.lettersFromMarked}`,
+      );
+      console.log(`wildcards used      : ${agg.wildcards}   reserve overflow=${agg.reserveOverflow}`);
       console.log(
         `encounter seconds   : ${stat(agg.seconds.map((v, i) => v / agg.fightsPerRun[i]))}   target 8-15`,
       );

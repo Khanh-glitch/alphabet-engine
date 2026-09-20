@@ -216,7 +216,8 @@ test('same seed produces the same encounter', () => {
       if (i % 120 === 0) {
         samples.push(
           [
-            battle.pool.size,
+            battle.reserveSize,
+            battle.machine.committed().length,
             battle.telemetry.data.bagRemaining,
             battle.enemies.length,
             battle.entities.length,
@@ -513,8 +514,12 @@ test('focus switches are counted, and re-focusing the same slot is not a switch'
 
 test('focus cannot be set to a slot with no blueprint', () => {
   const m = machineOf('BOMB');
+  // Focus starts on the first equipped recipe so the mechanic is visible from
+  // frame one (brief 3.2: exactly one Blueprint is focused during combat).
+  assert.equal(m.focusSlot, 0);
   assert.equal(m.setFocus(2), false);
-  assert.equal(m.focusSlot, -1);
+  assert.equal(m.focusSlot, 0, 'a rejected focus must not move the focus');
+  assert.equal(m.focusSwitches, 0, 'a rejected focus is not a switch');
 });
 
 test('the machine is deterministic: identical input yields identical state', () => {

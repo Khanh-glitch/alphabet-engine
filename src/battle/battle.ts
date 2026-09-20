@@ -12,8 +12,9 @@
  *  - everything is reproducible from the run seed.
  */
 import { LetterBag } from '../alphabet/bag';
-import { LetterPool } from '../alphabet/pool';
-import type { PoolEntry } from '../alphabet/types';
+import { Machine } from '../alphabet/sockets';
+import type { Assignment, LetterSource, RuntimeLetter } from '../alphabet/sockets';
+import { Provenance } from '../alphabet/provenance';
 import type { MachineRuleDef } from '../alphabet/rules';
 import { Telemetry, trace } from '../alphabet/trace';
 import { Rng, streamFor, clamp } from '../core/rng';
@@ -49,7 +50,17 @@ const BEAT = { gather: 0.36, lock: 0.2, emerge: 0.26 } as const;
 
 export class Battle {
   readonly cfg: BattleConfig;
-  readonly pool = new LetterPool();
+  /**
+   * The player's machine — the single authority for where a letter goes.
+   *
+   * V1 had one shared pool that a resolver silently consumed. V2 replaces it
+   * with visible per-Blueprint sockets plus a small reserve, so an incoming tile
+   * has a destination the player can point at (`GAMEPLAY_REWORK_V2.md` 3.1).
+   * There is deliberately no second pool: one source of truth for letter state.
+   */
+  readonly machine: Machine;
+  /** Causal ancestry of every craft, kill and dropped letter (brief 3.5). */
+  readonly provenance = new Provenance();
   readonly bag: LetterBag;
   readonly telemetry = new Telemetry();
   readonly events: BattleEvent[] = [];
@@ -72,8 +83,6 @@ export class Battle {
 
   /** Time of the most recent craft — the HUD uses it to show a live chain. */
   lastCraftAt = -99;
-  /** Set when a fresh bag cycle starts; a new cycle ends any live cascade. */
-  private cycleSinceCraft = false;
   private drawTimer = 0;
   private spawnQueue: { wave: WaveDef; index: number; at: number }[] = [];
   private guaranteed: Letter[] = [];
@@ -82,6 +91,26 @@ export class Battle {
   private craftCount = 0;
   private craftCountByBlueprint: Record<string, number> = {};
   private killsThisEncounter = 0;
+  private bagDrawIndex = 0;
+  /** Entity that dealt the damage currently being applied — attributes kills. */
+  private damageSource: number | null = null;
+  /** Entity id → provenance node of the craft that produced it. */
+  private entityProvenance = new Map<number, number>();
+  /** V2 measurements required by brief 12.4. */
+  readonly v2 = {
+    crafts: 0,
+    bagOnlyCrafts: 0,
+    combatFedCrafts: 0,
+    wildcardsUsed: 0,
+    wildcardTimes: [] as number[],
+    chainLengths: [] as number[],
+    maxCascade: 0,
+    marksPlaced: 0,
+    markedKills: 0,
+    lettersFromMarked: 0,
+    /** Seconds where nothing was happening and the player had no input. */
+    deadWatch: 0,
+  };
   private randomLetterRng: Rng;
   private cleanupCd = 0;
   private introT = 0;
@@ -94,6 +123,10 @@ export class Battle {
     this.cfg = cfg;
     this.slots = cfg.blueprints.slice(0, 3);
     while (this.slots.length < 3) this.slots.push(null);
+    this.machine = new Machine(
+      this.slots.filter((b): b is BlueprintDef => b !== null),
+      { reserveCap: TUNE.reserveCap },
+    );
     this.bag = new LetterBag(cfg.bagTiles, streamFor(cfg.seed, 'bag'));
     this.coreHp = cfg.coreHp;
     this.maxCoreHp = cfg.maxCoreHp;
@@ -114,7 +147,7 @@ export class Battle {
     this.introT = 0.5;
     // Authored opening letters: the first craft is designed, not hoped for.
     for (const letter of cfg.encounter.openingPool ?? []) {
-      this.pool.add(letter, 'bonus', 0);
+      this.feed(letter, { kind: 'rule', ruleId: 'opening' });
     }
     this.applyEncounterStart();
     this.refreshTargets();
@@ -136,8 +169,12 @@ export class Battle {
           trace.log('rule', `${rule.id}: +${letter} vào túi`);
         },
         addToPool: (letter) => {
-          this.pool.add(letter, 'bonus', this.time);
-          this.emit({ kind: 'draw', letter, uid: this.pool.all()[this.pool.size - 1].uid, source: 'bonus' });
+          const a = this.feed(letter, { kind: 'rule', ruleId: rule.id });
+          this.emit({
+            kind: 'draw', letter, uid: a.letter.id, source: 'bonus',
+            slot: a.slot, socket: a.socket, reason: a.reason,
+          });
+          this.resolveCompletions();
         },
         randomLetter: () => this.randomLetterRng.pick(ALPHABET.split('')),
       });
@@ -154,7 +191,11 @@ export class Battle {
         craftIndex: this.craftCount,
         blueprintCraftIndex: perBlueprint,
         refund: (letter) => {
-          this.pool.add(letter, 'recycle', this.time);
+          this.feed(letter, {
+            kind: 'refund',
+            blueprintId: bp.id,
+            objectId: undefined,
+          });
           trace.log('rule', `${rule.id}: hoàn ${letter}`);
         },
       });
@@ -172,8 +213,11 @@ export class Battle {
         ...e,
         addBonus: (letter, count = 1) => {
           for (let i = 0; i < count; i++) {
-            const entry = this.pool.add(letter, 'bonus', this.time);
-            this.emit({ kind: 'draw', letter, uid: entry.uid, source: 'bonus' });
+            const a = this.feed(letter, { kind: 'rule', ruleId: rule.id });
+            this.emit({
+              kind: 'draw', letter, uid: a.letter.id, source: 'bonus',
+              slot: a.slot, socket: a.socket, reason: a.reason,
+            });
             trace.log('rule', `${rule.id}: nhân đôi ${letter}`);
           }
         },
@@ -188,8 +232,11 @@ export class Battle {
         letters,
         killIndex: this.killsThisEncounter,
         duplicate: (letter) => {
-          const entry = this.pool.add(letter, 'bonus', this.time);
-          this.emit({ kind: 'draw', letter, uid: entry.uid, source: 'bonus' });
+          const a = this.feed(letter, { kind: 'rule', ruleId: rule.id });
+          this.emit({
+            kind: 'draw', letter, uid: a.letter.id, source: 'bonus',
+            slot: a.slot, socket: a.socket, reason: a.reason,
+          });
           trace.log('rule', `${rule.id}: nhân ${letter}`);
         },
       });
@@ -267,44 +314,73 @@ export class Battle {
     return this.enemies.filter((e) => !e.dead && e.carry);
   }
 
-  // ---- pool / recipe resolution -----------------------------------------
+  // ---- letter routing ---------------------------------------------------
+
+  /**
+   * Route one letter into the machine.
+   *
+   * This is the only way a letter enters the battle: bag draws, carrier
+   * recoveries, wildcard substitutions, rule injections and refunds all pass
+   * through here, so there is exactly one place routing happens — and therefore
+   * exactly one place Focus can be shown to matter.
+   *
+   * The machine decides; the caller emits the event, because only the caller
+   * knows where the letter physically came from.
+   */
+  private feed(char: Letter, source: LetterSource, killNodeId?: number): Assignment {
+    const prov = this.provenance.letter(source, this.time, killNodeId);
+    const letter = this.machine.makeLetter(char, source, this.time, prov);
+    return this.machine.accept(letter);
+  }
 
   /** Recompute which blueprints the wildcard could complete right now. */
   refreshTargets(): void {
-    const out: WildcardTarget[] = [];
-    this.slots.forEach((bp, slot) => {
-      if (!bp) return;
-      const missing = this.pool.missing(bp.recipe);
-      if (missing.length === 1) out.push({ blueprint: bp, slot, missing: missing[0] });
-    });
-    this.targets = out;
+    this.targets = this.machine
+      .wildcardTargets()
+      .map((tg) => ({
+        blueprint: this.slots[tg.slot] as BlueprintDef,
+        slot: tg.slot,
+        missing: tg.char,
+        socket: tg.socket,
+      }));
   }
 
   /**
-   * Craft every blueprint the pool can currently satisfy, in slot order.
-   * Slot order is the documented tie-break: the leftmost equipped word wins.
-   * A guard caps crafts per call so a runaway economy cannot hang a frame.
+   * Craft every recipe whose sockets are all filled, in slot order.
+   *
+   * V1 scanned the pool for anything it could afford, which meant stockpiles
+   * silently turned into objects. V2 completes only when a socket row fills up,
+   * so every craft has a visible cause. The loop re-drains the reserve between
+   * crafts: emptying a socket can make a reserved letter useful again.
    */
-  private resolveCrafts(): void {
+  private resolveCompletions(): void {
     let guard = 0;
     for (;;) {
       if (guard++ > TUNE.maxCraftsPerTick) {
         trace.log('craft', 'guard tripped: quá nhiều lần ghép trong một nhịp');
         break;
       }
-      let done = false;
-      for (let slot = 0; slot < this.slots.length; slot++) {
-        const bp = this.slots[slot];
-        if (!bp) continue;
+      let progress = false;
+
+      // A reserved letter may have become wanted when a socket opened.
+      for (const a of this.machine.drainReserve()) {
+        if (a.slot >= 0) progress = true;
+      }
+
+      for (const rt of this.machine.blueprints) {
+        const bp = rt.blueprint;
         if (this.atCapacity(bp)) continue;
-        if (!this.pool.hasRecipe(bp.recipe)) continue;
-        const entries = this.pool.take(bp.recipe);
-        if (entries.length === 0) continue;
-        this.beginCraft(bp, slot, entries, null);
-        done = true;
+        if (!this.machine.isComplete(rt)) continue;
+        const letters = this.machine.commit(rt.slot);
+        if (!letters) continue;
+        // Provenance, not a flag, tells us a wildcard was involved: the tile in
+        // the socket remembers where it came from.
+        const wild = letters.find((l) => l.source.kind === 'wildcard');
+        this.beginCraft(bp, rt.slot, letters, wild ? wild.char : null);
+        progress = true;
         break;
       }
-      if (!done) break;
+      if (!progress) break;
     }
     this.refreshTargets();
   }
@@ -327,57 +403,96 @@ export class Battle {
   private beginCraft(
     bp: BlueprintDef,
     slot: number,
-    entries: PoolEntry[],
+    letters: RuntimeLetter[],
     viaWildcard: Letter | null,
   ): void {
-    // Chain bookkeeping. A chain is a burst of crafts fed by combat drops: it
-    // grows while crafts keep landing back-to-back and is cut by silence or by
-    // the bag starting a new cycle (which is the player's economy, not the chain).
-    const withinWindow = this.time - this.lastCraftAt <= TUNE.chainWindow;
-    const fresh = withinWindow && !this.cycleSinceCraft;
-    this.chain = fresh ? this.chain + 1 : 1;
+    // Chain bookkeeping. Depth is now causal, not temporal: a craft inherits the
+    // ancestry of the letters it consumed (brief 3.5.5), so two crafts landing
+    // close together no longer count as a cascade unless one actually fed the
+    // other.
+    const consumed = letters.map((l) => l.provenance);
+    const node = this.provenance.craft(bp.id, consumed, this.time);
+    const depth = this.provenance.chainDepth(node);
+    const fromCombat = letters.some((l) => l.source.kind === 'enemy');
+
+    this.chain = depth;
     this.lastCraftAt = this.time;
-    this.cycleSinceCraft = false;
-    this.bestChain = Math.max(this.bestChain, this.chain);
+    this.bestChain = Math.max(this.bestChain, depth);
     this.fireCraftHooks(bp);
-    const letters = entries.map((e) => e.letter);
+    const chars = letters.map((l) => l.char);
     const lane = this.busiestLane();
     this.pending.push({
       blueprint: bp.id,
       slot,
-      letters,
+      letters: chars,
+      provenance: node,
       phase: 0,
       t: 0,
       viaWildcard,
       lane,
     });
-    this.emit({ kind: 'craftStart', blueprint: bp.id, slot, letters });
-    if (this.chain > 1) this.emit({ kind: 'chain', depth: this.chain });
-    this.telemetry.onCraft(bp.id, this.time, this.chain);
-    trace.log('craft', `${bp.word} (${letters.join('')})`, { chain: this.chain });
+    this.emit({ kind: 'craftStart', blueprint: bp.id, slot, letters: chars, provenance: node });
+    if (depth > 1) this.emit({ kind: 'chain', depth });
+    this.telemetry.onCraft(bp.id, this.time, depth);
+    this.v2.crafts += 1;
+    if (fromCombat) this.v2.combatFedCrafts += 1;
+    else this.v2.bagOnlyCrafts += 1;
+    this.v2.chainLengths.push(depth);
+    this.v2.maxCascade = Math.max(this.v2.maxCascade, depth);
+    trace.log(
+      'craft',
+      `${bp.word} (${chars.join('')})${depth > 1 ? ` ⛓ ${depth}` : ''}`,
+      { chain: depth },
+    );
   }
 
-  /** Player intervention: fill the single missing letter of one recipe. */
+  /** Player intervention: fill the single missing socket of one recipe. */
   useWildcard(slot: number): boolean {
     if (this.wildcardsLeft <= 0 || this.state !== 'fight') return false;
     const target = this.targets.find((tg) => tg.slot === slot);
     if (!target) return false;
-    // The pool is missing exactly one letter; the wildcard covers that slot.
-    const partial = this.pool.takeAllBut(target.blueprint.recipe, target.missing);
-    if (!partial) return false;
+    // The machine places the tile in the exact socket that was empty, so the
+    // wildcard resolves a *position*, not an abstract multiset (brief 3.3).
+    const letter = this.machine.fillSocket(target.slot, target.socket, this.time, 0);
+    if (!letter) return false;
     this.wildcardsLeft -= 1;
-    const wildEntry: PoolEntry = {
-      uid: 0,
-      letter: target.missing,
-      source: 'wildcard',
-      t: this.time,
-    };
-    this.beginCraft(target.blueprint, slot, [...partial, wildEntry], target.missing);
-    this.emit({ kind: 'wildcard', slot, letter: target.missing });
+    this.emit({ kind: 'wildcard', slot, letter: target.missing, socket: target.socket });
     this.telemetry.onWildcard(this.time < 6);
-    trace.log('wildcard', `điền ${target.missing} cho ${target.blueprint.word}`);
-    this.refreshTargets();
+    this.v2.wildcardsUsed += 1;
+    this.v2.wildcardTimes.push(this.time);
+    trace.log('wildcard', `điền ${target.missing} vào ô ${target.socket} của ${target.blueprint.word}`);
+    this.resolveCompletions();
     return true;
+  }
+
+  // ---- focus (brief 3.2) -------------------------------------------------
+
+  /**
+   * Steer the machine toward one recipe. No cooldown, no cost, no pause — the
+   * only thing it changes is who wins a contested letter.
+   */
+  focus(slot: number): boolean {
+    const changed = this.machine.setFocus(slot);
+    if (changed) {
+      this.emit({ kind: 'focus', slot });
+      trace.log('focus', `ưu tiên ${this.slots[slot]?.word ?? slot}`);
+    }
+    return changed;
+  }
+
+  get focusSlot(): number {
+    return this.machine.focusSlot;
+  }
+
+  /** Letters a recipe still needs, left to right — the socket row, as data. */
+  missingFor(bp: BlueprintDef): Letter[] {
+    const rt = this.machine.bySlot(this.slots.indexOf(bp));
+    if (!rt) return bp.recipe.slice();
+    return rt.sockets.filter((sk) => sk.letter === null).map((sk) => sk.requiredChar);
+  }
+
+  get reserveSize(): number {
+    return this.machine.reserve.length;
   }
 
   // ---- main step ---------------------------------------------------------
@@ -490,16 +605,24 @@ export class Battle {
     if (this.drawTimer > 0) return;
     this.drawTimer = TUNE.drawInterval;
     const result = this.bag.draw();
-    const entry = this.pool.add(result.letter, 'bag', this.time, true);
     if (result.cycleStart) {
-      this.cycleSinceCraft = true;
       this.cycleAt = this.time;
     }
+    const drawIndex = this.bagDrawIndex++;
+    const a = this.feed(result.letter, { kind: 'bag', drawIndex, cycle: result.cycle });
     this.telemetry.onDraw();
-    this.emit({ kind: 'draw', letter: result.letter, uid: entry.uid, source: 'bag' });
+    this.emit({
+      kind: 'draw',
+      letter: result.letter,
+      uid: a.letter.id,
+      source: 'bag',
+      slot: a.slot,
+      socket: a.socket,
+      reason: a.reason,
+    });
     this.fireDrawHooks(result);
-    trace.log('draw', `${result.letter} → kho (vòng ${result.cycle})`);
-    this.resolveCrafts();
+    trace.log('draw', `${result.letter} → ${a.slot < 0 ? 'kho dự trữ' : `${this.slots[a.slot]?.word} ô ${a.socket}`}`);
+    this.resolveCompletions();
   }
 
   private stepCrafts(dt: number): void {
@@ -523,6 +646,12 @@ export class Battle {
   private materialise(craft: PendingCraft): void {
     const bp = BLUEPRINTS[craft.blueprint];
     const entity = this.createEntity(craft.blueprint, craft.lane);
+    // The object inherits the craft's ancestry, so anything it kills — and any
+    // letter that kill releases — belongs to the same causal chain.
+    this.entityProvenance.set(
+      entity.id,
+      this.provenance.object(craft.provenance, this.time, craft.blueprint),
+    );
     this.emit({
       kind: 'materialise',
       blueprint: craft.blueprint,
@@ -740,7 +869,7 @@ export class Battle {
       let dmg = damage * falloff;
       if (enemy.freezeT > 0) dmg *= 1 + TUNE.ice.shatterBonus;
       if (enemy.kind === 'brute' || enemy.kind === 'boss') dmg *= 1.25;
-      this.damageEnemy(enemy, dmg);
+      this.hit(ent, enemy, dmg);
       enemy.x += 26 * kick;
       enemy.stunT = Math.max(enemy.stunT, 0.18);
     }
@@ -758,7 +887,7 @@ export class Battle {
       if (enemy.dead) continue;
       if (enemy.flying) continue;
       if (Math.abs(enemy.x - ent.x) <= radius) {
-        this.damageEnemy(enemy, TUNE.fire.dps * dt, { pulse: false });
+        this.hit(ent, enemy, TUNE.fire.dps * dt, { pulse: false });
         if (this.rand().chance(dt * 0.6)) {
           enemy.burnT = Math.max(enemy.burnT, 1.4);
           enemy.burnDps = Math.max(enemy.burnDps, TUNE.fire.dps * 0.5);
@@ -793,7 +922,7 @@ export class Battle {
       ent.timer -= dt;
       if (ent.timer <= 0) {
         ent.timer = TUNE.bee.biteEvery;
-        this.damageEnemy(target, TUNE.bee.damage);
+        this.hit(ent, target, TUNE.bee.damage);
         this.emit({ kind: 'push', x: ent.x, y: ent.y });
       }
     }
@@ -843,7 +972,7 @@ export class Battle {
       if (enemy.dead || enemy.flying) continue;
       if (ent.hitIds.includes(enemy.id)) continue;
       if (Math.abs(enemy.x - ent.x) < TUNE.saw.radius + enemy.size) {
-        this.damageEnemy(enemy, TUNE.saw.damage);
+        this.hit(ent, enemy, TUNE.saw.damage);
         ent.hitIds.push(enemy.id);
       }
     }
@@ -862,7 +991,7 @@ export class Battle {
       for (const enemy of this.enemies) {
         if (enemy.dead || enemy.flying) continue;
         if (Math.abs(enemy.x - ent.x) <= TUNE.oil.radius + 20) {
-          this.damageEnemy(enemy, TUNE.oil.burnDps * dt, { pulse: false });
+          this.hit(ent, enemy, TUNE.oil.burnDps * dt, { pulse: false });
           enemy.burnT = Math.max(enemy.burnT, 1.2);
           enemy.burnDps = Math.max(enemy.burnDps, TUNE.oil.burnDps * 0.4);
         }
@@ -1005,6 +1134,20 @@ export class Battle {
    * 1.0 forever, so anything standing in fire renders as a solid white blob and
    * its own burning animation is hidden.
    */
+  /**
+   * Damage attributed to one of the player's objects.
+   *
+   * Attribution is what lets the cascade be *causal*: the kill knows which craft
+   * produced the weapon, so the letter it releases inherits that craft's
+   * ancestry. Damage with no identifiable source (ambient burn, a breach) goes
+   * through `damageEnemy` directly and starts no lineage.
+   */
+  private hit(source: Entity, enemy: Enemy, amount: number, opts: { pulse?: boolean } = {}): void {
+    this.damageSource = source.id;
+    this.damageEnemy(enemy, amount, opts);
+    this.damageSource = null;
+  }
+
   damageEnemy(enemy: Enemy, amount: number, opts: { pulse?: boolean } = {}): void {
     if (enemy.dead) return;
     enemy.hp -= amount;
@@ -1017,14 +1160,39 @@ export class Battle {
     const letters: Letter[] = [];
     if (enemy.carry) letters.push(enemy.carry);
     this.emit({ kind: 'kill', x: enemy.x, y: 300 + enemy.lane * 40, letter: enemy.carry, lane: enemy.lane });
-    if (enemy.carry) {
-      const entry = this.pool.add(enemy.carry, 'carrier', this.time, true);
-      this.emit({ kind: 'letterReturn', letter: enemy.carry, x: enemy.x, y: 300, uid: entry.uid });
-      trace.log('drop', `${enemy.carry} rơi → kho`);
-    }
     this.killsThisEncounter += 1;
+    // The kill is caused by whichever object last dealt this damage, so the
+    // letter it releases can be traced back to the craft that made that object.
+    const killNode = this.provenance.kill(
+      this.time,
+      this.damageSource !== null ? this.entityProvenance.get(this.damageSource) : undefined,
+    );
+    if (enemy.carry) {
+      const a = this.feed(
+        enemy.carry,
+        { kind: 'enemy', enemyId: enemy.id, causedByObjectId: this.damageSource ?? undefined },
+        killNode,
+      );
+      const ancestor = this.provenance.causalAncestor(killNode);
+      this.emit({
+        kind: 'letterReturn',
+        letter: enemy.carry,
+        x: enemy.x,
+        y: 300,
+        uid: a.letter.id,
+        slot: a.slot,
+        socket: a.socket,
+        reason: a.reason,
+        fromBlueprint: ancestor?.blueprintId ?? null,
+      });
+      trace.log(
+        'drop',
+        `${enemy.carry} rơi → ${a.slot < 0 ? 'kho dự trữ' : `${this.slots[a.slot]?.word} ô ${a.socket}`}` +
+          (ancestor ? ` (nhân quả từ ${ancestor.blueprintId})` : ''),
+      );
+    }
     this.fireKillHooks(letters, !!enemy.carry);
-    this.resolveCrafts();
+    this.resolveCompletions();
   }
 
   /**
@@ -1089,14 +1257,6 @@ export class Battle {
     }
   }
 
-  /** Settle tiles that finished flying into the pool. */
-  settleIncoming(): void {
-    const now = this.time;
-    for (const entry of this.pool.all()) {
-      if (entry.incoming && now - entry.t > TUNE.letterFlight) this.pool.settle(entry.uid);
-    }
-  }
-
   /** Snapshot used by the renderer for HUD counters. */
   snapshot(): {
     corePct: number;
@@ -1110,7 +1270,7 @@ export class Battle {
     return {
       corePct: this.maxCoreHp > 0 ? this.coreHp / this.maxCoreHp : 0,
       chain: this.chain,
-      poolSize: this.pool.size,
+      poolSize: this.machine.reserve.length,
       bagRemaining: this.bag.remaining,
       cycle: this.bag.cycleIndex,
       wildcards: this.wildcardsLeft,

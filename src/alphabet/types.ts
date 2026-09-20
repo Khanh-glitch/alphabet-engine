@@ -84,6 +84,11 @@ export interface WildcardTarget {
   blueprint: BlueprintDef;
   slot: number;
   missing: Letter;
+  /**
+   * Which socket position is empty. V2 resolves a *position*, not an abstract
+   * multiset, so the wildcard tile has somewhere exact to land (brief 3.3).
+   */
+  socket: number;
 }
 
 /** Multiset helpers shared by bag, pool and resolver. */

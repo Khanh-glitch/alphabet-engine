@@ -6,6 +6,12 @@
  * guesses to be validated by the balance simulator (`npm run sim -- --runs=10 --kit=assembly`).
  */
 export const TUNE = {
+  /**
+   * V2 reserve capacity (brief 3.1.2 hypothesises 4-6). Deliberately here rather
+   * than hardcoded: the brief says not to finalize it before playtesting.
+   */
+  reserveCap: 5,
+
   /** Seconds of fight time per encounter target (experience guide, not a timer). */
   encounterTarget: { first: 12, normal: 16, elite: 24, boss: 40 },
 

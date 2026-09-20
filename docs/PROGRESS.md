@@ -35,9 +35,20 @@ replaces the abstract shared pool with visible recipe sockets, adds Focus and
 Target Mark as steering mechanics, and replaces the timer-based chain with true
 causal provenance. Status per phase: `docs/V2_STATUS.md`.
 
-Only phase V2.0 (baseline) and V2.1 (socket domain model) are complete. The
-playable build is intentionally unchanged so far — the socket model exists,
-is fully tested, and is not yet wired into the simulation.
+Phases V2.0, V2.1 and V2.2 are complete and the playable build now runs on the V2
+model. See `docs/V2_STATUS.md` for detail and `docs/V2_BASELINE.md` for the
+before numbers.
+
+**V2.2 landed:** one source of truth for letter state. `Battle.pool` is gone,
+replaced by `Battle.machine`; every letter — bag draw, carrier drop, wildcard,
+rule injection, refund — enters through a single `feed()` gate, which is what
+makes Focus provable rather than decorative. Focus is bound to click and 1/2/3,
+defaults to the first recipe so the mechanic is visible from frame one, and is
+drawn as corner brackets plus a labelled chip (never colour alone).
+
+Chain depth is now causal, not temporal: `src/alphabet/provenance.ts` records
+what each craft consumed, and a craft is one deeper than the deepest craft that
+fed it.
 
 ## Working
 

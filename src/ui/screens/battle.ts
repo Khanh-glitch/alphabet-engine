@@ -78,7 +78,6 @@ export function createBattleScreen(): Screen {
         battle.update(STEP);
         acc -= STEP;
       }
-      battle.settleIncoming();
 
       fx.absorb(battle.events, {
         shake: store.settings.shake,
@@ -107,6 +106,9 @@ export function createBattleScreen(): Screen {
           case 'wildcard':
             sfx.wildcard();
             break;
+          case 'focus':
+            sfx.ui();
+            break;
           case 'cleared':
             sfx.cleared();
             break;
@@ -128,7 +130,7 @@ export function createBattleScreen(): Screen {
           hint = t('hintFirstCraft');
           // Point at the recipes while they are still filling: the player needs
           // to know *where* the craft happens, not just that it will.
-          hintTarget = battle.pool.size > 1 ? 'recipes' : 'pool';
+          hintTarget = battle.machine.committed().length > 0 ? 'recipes' : 'pool';
           hintT = 7;
         } else if (battle.telemetry.data.kills < 2 && battle.enemies.some((e) => e.carry)) {
           hint = t('hintCarrier');
@@ -183,8 +185,13 @@ export function createBattleScreen(): Screen {
         const rect = cardRect(slot);
         const canWild = wildcardMode && eligible.includes(slot);
         app.ui.hit(`hud.card.${slot}`, rect, {
-          tooltip: `${bp.word} — ${loc(bp.name)} · ${loc(bp.desc)}`,
+          tooltip: wildcardMode
+            ? `${bp.word} — ${t('wildcardPick')}`
+            : `${bp.word} — ${loc(bp.name)} · ${loc(bp.desc)}`,
         });
+        // The bottom strip opens the explain panel; the card body steers Focus.
+        // Both live on one card, so the strip is registered last and wins there.
+        app.ui.hit(`hud.cardinfo.${slot}`, { x: rect.x, y: rect.y + rect.h - 30, w: rect.w, h: 30 });
         if (wildcardMode && !canWild) {
           g.fillStyle = rgba('#05070e', 0.5);
           rr(g, rect.x, rect.y, rect.w, rect.h, 10);
@@ -226,7 +233,7 @@ export function createBattleScreen(): Screen {
             .forEach((line, i) => {
               label(g, line, px + 14, py + 88 + i * 18, { size: 13, color: C.dim, weight: 500 });
             });
-          const missing = battle.pool.missing(bp.recipe);
+          const missing = battle.missingFor(bp);
           label(
             g,
             missing.length === 0 ? t('poolReadyCraft') : `${t('poolStillNeeds')}${missing.join(' ')}`,
@@ -312,13 +319,21 @@ export function createBattleScreen(): Screen {
         wildcardMode = false;
         return;
       }
+      if (id.startsWith('hud.cardinfo.')) {
+        const slot = Number(id.split('.')[2]);
+        inspectSlot = inspectSlot === slot ? null : slot;
+        sfx.ui();
+        return;
+      }
       if (id.startsWith('hud.card.')) {
         const slot = Number(id.split('.')[2]);
         if (wildcardMode) {
           if (battle.useWildcard(slot)) wildcardMode = false;
           return;
         }
-        inspectSlot = inspectSlot === slot ? null : slot;
+        // Primary action is Focus (brief 3.2.2): clicking a word tells the
+        // machine to send contested letters to it.
+        battle.focus(slot);
         sfx.ui();
       }
     },
@@ -334,7 +349,17 @@ export function createBattleScreen(): Screen {
         return true;
       }
       if (e.key === '1' || e.key === '2' || e.key === '3') {
-        app.speed = Number(e.key);
+        // Brief 3.2.2: 1-2-3 selects Focus. Speed keeps the button and gets a
+        // key of its own rather than fighting the mandate.
+        battle.focus(Number(e.key) - 1);
+        sfx.ui();
+        return true;
+      }
+      if (e.key === 's') {
+        app.speed = app.speed >= 3 ? 1 : app.speed + 1;
+        store.settings.speed = app.speed as 1 | 2 | 3;
+        store.saveSettings();
+        sfx.ui();
         return true;
       }
       if (e.key === 'Escape') {

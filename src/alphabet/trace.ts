@@ -19,6 +19,8 @@ export type TraceKind =
   | 'rule'
   | 'stall'
   | 'breach'
+  | 'focus'
+  | 'mark'
   | 'start';
 
 export interface TraceLine {

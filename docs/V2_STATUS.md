@@ -41,7 +41,18 @@ completion — plus determinism and the Focus-changes-allocation acceptance test
 simulation is a 23-call-site refactor across three files. Doing half of it would
 leave the playable build broken, so it is its own phase.
 
-## Phase V2.2 — Focus  ⬜ next
+## Phase V2.2 — Focus  ✅ done
+## Phase V2.3 — Visible letter flight  ✅ done
+## Phase V2.4 — Wildcard socket insertion  ✅ done
+## Phase V2.5 — Mark + BEE  ✅ done
+## Phase V2.6 — Provenance + true causal cascade  ✅ done
+
+See `docs/V2_AUDIT.md` for the measured result of all five, including the
+mechanics that turned out not to matter.
+
+## Phase V2.7 — Momentum  ⬜ not started
+
+## Original V2.2 note (kept for the record)
 
 Wire `Machine` into `Battle`: replace `stepBag`, `resolveCrafts`, `beginCraft`,
 `useWildcard`, the kill path and the refund/rule paths. Add click / 1-2-3 focus

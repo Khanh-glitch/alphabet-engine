@@ -88,6 +88,8 @@ risks — including the documented deviation from the brief's target engine.
 
 ## Documentation
 
+- **`docs/ASSET_MANIFEST.md`** — asset shopping list: what art and audio the
+  game needs, at what sizes, under what licence.
 - **`docs/GAMEPLAY.md`** — full gameplay specification, written against the
   shipped code, plus an audit of every place the game disagrees with itself.
 - `docs/GDD.md`, `docs/BALANCE.md`, `docs/UX_UI.md`, `docs/DECISIONS.md` — design record.

@@ -16,7 +16,16 @@ import { RUN } from '../../content/encounters';
 
 import { FxLayer } from '../../render/fx';
 import { drawArena } from '../../render/arena';
-import { drawHud, cardRect } from '../battleHud';
+import {
+  drawHud,
+  cardRect,
+  socketGeom,
+  LETTER_FLIGHT,
+  BAGBOX,
+  TRAY,
+  type HudFlight,
+} from '../battleHud';
+import type { Battle } from '../../battle/battle';
 import { openHowTo } from './howto';
 import type { Screen } from '../../app/app';
 
@@ -31,6 +40,36 @@ export function createBattleScreen(): Screen {
   let hintT = 0;
   let hint: string | null = null;
   let hintTarget: 'pool' | 'recipes' | 'carriers' | 'wildcard' | null = null;
+  /**
+   * Tiles currently flying into sockets.
+   *
+   * The simulation routes a letter the instant it arrives, so the flight lives
+   * with the screen: the sim stays deterministic and time-independent, and the
+   * animation owns presentation only.
+   */
+  let flights: HudFlight[] = [];
+  let flightZ = 0;
+
+  /** Where a routed letter should fly to, in HUD space. */
+  const destinationOf = (
+    battle: Battle,
+    slot: number,
+    socket: number,
+  ): { x: number; y: number; size: number } => {
+    if (slot < 0) {
+      // Reserve-bound: land on the tray position it will actually occupy.
+      const idx = Math.max(0, battle.machine.reserve.length - 1);
+      return { x: TRAY.x + 118 + 21 + idx * 49, y: TRAY.y + TRAY.h / 2 - 8, size: 42 };
+    }
+    const bp = battle.slots[slot];
+    if (!bp) return { x: TRAY.x + 140, y: TRAY.y + 30, size: 42 };
+    const geom = socketGeom(bp, slot);
+    return {
+      x: geom.startX + socket * (geom.size + geom.gap) + geom.size / 2,
+      y: geom.ty + geom.size / 2,
+      size: geom.size,
+    };
+  };
 
   /** Wrap text to a pixel width — used by the inspect panel and hints. */
   const wrap = (g: Ctx, text: string, maxW: number): string[] => {
@@ -67,6 +106,8 @@ export function createBattleScreen(): Screen {
       hintTarget = null;
       inspectSlot = null;
       wildcardMode = false;
+      flights = [];
+      flightZ = 0;
     },
     update(dt, app) {
       const battle = app.battle;
@@ -84,6 +125,32 @@ export function createBattleScreen(): Screen {
         reducedFlashes: store.settings.reducedFlashes,
       });
       for (const ev of battle.events) {
+        // Spawn an incoming-letter flight for anything that was routed somewhere.
+        if (ev.kind === 'draw') {
+          const dest = destinationOf(battle, ev.slot, ev.socket);
+          flights.push({
+            char: ev.letter,
+            fromX: BAGBOX.x + BAGBOX.w - 40,
+            fromY: BAGBOX.y + BAGBOX.h / 2,
+            toX: dest.x,
+            toY: dest.y,
+            size: dest.size,
+            t: 0,
+            z: flightZ++,
+          });
+        } else if (ev.kind === 'letterReturn') {
+          const dest = destinationOf(battle, ev.slot, ev.socket);
+          flights.push({
+            char: ev.letter,
+            fromX: ev.x,
+            fromY: ev.y + 40,
+            toX: dest.x,
+            toY: dest.y,
+            size: dest.size,
+            t: 0,
+            z: flightZ++,
+          });
+        }
         switch (ev.kind) {
           case 'craftStart':
             sfx.craft(battle.chain);
@@ -120,6 +187,10 @@ export function createBattleScreen(): Screen {
         }
       }
       battle.events.length = 0;
+      const fstep = dt * app.speed;
+      for (const f of flights) f.t += fstep;
+      flights = flights.filter((f) => f.t < LETTER_FLIGHT);
+      flights.sort((a, b) => a.z - b.z);
       fx.update(dt);
 
       // Contextual teaching hints, one at a time, never modal.
@@ -212,6 +283,7 @@ export function createBattleScreen(): Screen {
         hint: hint && hintT > 0 ? hint : null,
         hintEmphasis: hintT > 1,
         hintTarget: hint && hintT > 0 ? hintTarget : null,
+        flights,
       });
 
       fx.drawOverlay(g);

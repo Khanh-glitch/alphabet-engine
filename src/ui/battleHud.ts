@@ -37,6 +37,43 @@ export const BAGBOX: Rect = { x: 24, y: 730, w: 250, h: 70 };
 export const TRAY: Rect = { x: 286, y: 730, w: 834, h: 70 };
 export const WILD_RECT: Rect = { x: 1132, y: 730, w: 284, h: 70 };
 
+/** How long a tile spends flying into its socket, in seconds. */
+export const LETTER_FLIGHT = 0.34;
+
+/**
+ * Socket row geometry for one card.
+ *
+ * Extracted so the card and the incoming-letter animation compute the same
+ * destination from the same code — the brief's whole claim is that a letter
+ * visibly travels *into* a socket, which only reads correctly if the flight
+ * lands exactly where the socket is drawn.
+ */
+export function socketGeom(
+  bp: BlueprintDef,
+  slot: number,
+): { startX: number; ty: number; size: number; gap: number } {
+  const r = cardRect(slot);
+  const gap = 5;
+  const avail = r.w - 32;
+  const size = Math.min(52, (avail - (bp.recipe.length - 1) * gap) / bp.recipe.length);
+  const totalW = bp.recipe.length * size + (bp.recipe.length - 1) * gap;
+  return { startX: r.x + (r.w - totalW) / 2, ty: r.y + 12, size, gap };
+}
+
+/** One tile in flight from its source to the socket it was routed into. */
+export interface HudFlight {
+  char: string;
+  fromX: number;
+  fromY: number;
+  toX: number;
+  toY: number;
+  size: number;
+  /** Elapsed seconds. The screen owns this because it owns real time. */
+  t: number;
+  /** Depth on z, so a carrier drop draws over a bag draw if they overlap. */
+  z: number;
+}
+
 const STRIP: Rect = { x: 60, y: 14, w: 580, h: 68 };
 const CHAIN_BOX: Rect = { x: 656, y: 14, w: 112, h: 68 };
 const CONTROLS: Rect = { x: 784, y: 26, w: 196, h: 44 };
@@ -169,10 +206,29 @@ function blueprintCard(
   const startX = r.x + (r.w - totalW) / 2;
   const ty = r.y + 12;
 
-  covered.forEach((isFilled, i) => {
+  sockets.forEach((sk, i) => {
     const x = startX + i * (size + gap);
-    if (isFilled) {
-      tile(g, x, ty, size, bp.recipe[i], 'filled');
+    const letter = sk.letter;
+    // A tile that has not landed yet is drawn as a ghost socket: the letter is
+    // already committed logically (so the sim stays deterministic) but the player
+    // watches it arrive rather than finding the slot silently full.
+    const arriving = letter !== null && time - letter.createdAt < LETTER_FLIGHT;
+    if (arriving) {
+      // An outlined socket, not a filled one. A solid tint here read as "already
+      // occupied" — the tile itself is still in the air, so the socket has to
+      // look like it is *about to* receive something.
+      tile(g, x, ty, size, null, 'slot');
+      const e = clamp((time - letter.createdAt) / LETTER_FLIGHT, 0, 1);
+      g.save();
+      g.globalAlpha = 0.45 + e * 0.5;
+      g.strokeStyle = tone;
+      g.lineWidth = 2.5;
+      g.setLineDash([5, 4]);
+      rr(g, x + 3, ty + 3, size - 6, size - 6, 6);
+      g.stroke();
+      g.restore();
+    } else if (letter !== null) {
+      tile(g, x, ty, size, letter.char, 'filled');
     } else if (armed && eligible) {
       tile(g, x, ty, size, null, 'missing');
     } else {
@@ -197,14 +253,6 @@ function blueprintCard(
   });
   const craftLabel = crafts > 0 ? `×${crafts}` : null;
   const craftW = craftLabel ? measure(g, craftLabel, { size: T.small, weight: 800 }) : 0;
-  if (craftLabel) {
-    label(g, craftLabel, r.x + r.w - 16, r.y + r.h - 12, {
-      size: T.small,
-      color: C.dim,
-      align: 'right',
-      weight: 800,
-    });
-  }
   // What the pool still owes this recipe, spelled out — but only when the word
   // has not crafted yet, so it never collides with the craft counter.
   const owedCounts = new Map<string, number>();
@@ -218,11 +266,30 @@ function blueprintCard(
   const nameEnd = r.x + 16 + wordW + 42 + measure(g, loc(bp.name), { size: T.small, weight: 700 });
   const needText = owed.length > 0 ? `${H.needs} ${owed.join(' ')}` : null;
   const needW = needText ? measure(g, needText, { size: T.small, weight: 800 }) : 0;
-  const rightLimit = r.x + r.w - 16 - (craftLabel ? craftW + 12 : 0);
-  if (needText && rightLimit - needW > nameEnd + 8) {
-    label(g, needText, rightLimit, r.y + r.h - 12, {
+  const rightEdge = r.x + r.w - 16;
+  // While this card is playing its completion beat the sockets are already empty
+  // (the letters were committed) but the beat redraws them as the finished word.
+  // Printing "still needs ..." underneath that contradiction is worse than
+  // printing nothing.
+  const crafting = battle.pending.some((p) => p.slot === slot);
+  // The "still needs" line wins the corner and the craft counter yields: what the
+  // recipe is waiting for is actionable, how many times it has fired is not.
+  if (needText && !crafting && rightEdge - needW > nameEnd + 8) {
+    label(g, needText, rightEdge, r.y + r.h - 12, {
       size: T.small,
       color: rgba(C.gold, 0.95),
+      align: 'right',
+      weight: 800,
+    });
+  }
+  const showCounter =
+    craftLabel !== null &&
+    !crafting &&
+    (!needText || rightEdge - needW - 12 - craftW > nameEnd + 8);
+  if (showCounter && craftLabel) {
+    label(g, craftLabel, rightEdge, r.y + r.h - 12, {
+      size: T.small,
+      color: C.dim,
       align: 'right',
       weight: 800,
     });
@@ -310,7 +377,13 @@ function reserveTray(g: Ctx, battle: Battle, time: number): void {
   letters.forEach((letter, i) => {
     const x = trayInner.x + i * (size + gap);
     const age = time - letter.createdAt;
-    const pop = age < 0.3 ? 1 + (0.3 - age) * 1.3 : 1;
+    if (age < LETTER_FLIGHT) {
+      // Still in flight; the socket-style outline keeps the tray honest about
+      // what the player actually owns right now.
+      tile(g, x, y, size, null, 'slot');
+      return;
+    }
+    const pop = age < 0.62 ? 1 + (0.62 - age) * 0.85 : 1;
     tile(g, x, y, size, letter.char, 'filled', { scale: pop, press: 0 });
   });
 
@@ -542,6 +615,31 @@ function chainBox(g: Ctx, battle: Battle, active: boolean, pulse: number): void 
   }
 }
 
+/**
+ * Incoming-letter flights (brief 5).
+ *
+ * Each tile travels from where it actually came from — the bag, or a carrier
+ * dying on the battlefield — into the socket it was routed to. This is the
+ * mechanic the whole rework exists for: the player can answer "where did that
+ * letter go?" by watching, instead of reading a panel.
+ */
+function letterFlights(g: Ctx, flights: readonly HudFlight[]): void {
+  for (const f of flights) {
+    const e = clamp(f.t / LETTER_FLIGHT, 0, 1);
+    if (e >= 1) continue;
+    const ease = easeOut(e);
+    const x = f.fromX + (f.toX - f.fromX) * ease;
+    // A short arc, so a tile crossing the screen reads as thrown rather than
+    // pasted.
+    const y = f.fromY + (f.toY - f.fromY) * ease - Math.sin(ease * Math.PI) * 54;
+    const size = clamp(f.size * (0.72 + ease * 0.28), 20, 60);
+    tile(g, x - size / 2, y - size / 2, size, f.char, 'filled', {
+      alpha: 0.4 + ease * 0.6,
+      glow: ease > 0.75 ? C.gold : undefined,
+    });
+  }
+}
+
 function controlButton(
   g: Ctx,
   ui: Ui,
@@ -589,6 +687,8 @@ export interface HudOptions {
   hintEmphasis: boolean;
   /** What the current hint points at, so the lesson is anchored to the UI. */
   hintTarget?: 'pool' | 'recipes' | 'carriers' | 'wildcard' | null;
+  /** Tiles currently travelling into sockets, drawn over the cards. */
+  flights?: readonly HudFlight[];
 }
 
 export function drawHud(g: Ctx, ui: Ui, battle: Battle, opts: HudOptions): void {
@@ -629,6 +729,7 @@ export function drawHud(g: Ctx, ui: Ui, battle: Battle, opts: HudOptions): void 
   wildcard(g, ui, battle, opts.time, inter);
   encounterStrip(g, battle, opts.waveIndex, opts.waveTotal);
   chainBox(g, battle, battle.chain >= 2 && opts.chainActive, opts.chainPulse);
+  if (opts.flights && opts.flights.length > 0) letterFlights(g, opts.flights);
 
   // Controls: speed and pause, plus the run's position.
   plate(g, CONTROLS.x, CONTROLS.y, CONTROLS.w, CONTROLS.h, {

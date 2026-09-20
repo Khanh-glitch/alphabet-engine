@@ -90,6 +90,23 @@ pause/wave counts follow the run rather than a module constant.
 identical to the steering bot except that it never marks, which is what isolates
 Mark's contribution.
 
+## §3.6 — Hard object limits  ✅ done, measured as a null result
+
+Per-blueprint caps no longer block crafts; only an emergency global ceiling of 220
+objects remains, and hitting it is logged and counted rather than making a common
+recipe fail silently. Each object's natural lifetime is now what keeps the field
+readable.
+
+A/B over 96 fights per side (shipped) and 36 (evaluation set): **7.35 -> 7.54
+crafts per encounter on the shipped set (+2.6%) and 7.39 -> 7.39 on the evaluation
+set (0%)**, with peak simultaneous objects of 5-7 against limits of 4-6 and the
+emergency ceiling never reached.
+
+The brief's premise — that caps suppress the late-run engine — does not hold.
+The binding constraint is the letter economy, not object count. Kept because the
+brief mandates it and it removes a latent failure mode, but `docs/V2_AUDIT.md` §13
+records that it did not make the engine stronger.
+
 ## Phase V2.8 — Spatial simplification  ⬜ not started
 
 ## Phases V2.3 – V2.6  ✅ done

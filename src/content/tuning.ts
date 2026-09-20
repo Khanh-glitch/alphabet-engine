@@ -45,6 +45,18 @@ momentum: { ladder: [1, 1.12, 1.18, 1.24, 1.30, 1.30], ease: 2.5, grace: 1.4 },
    * V2 reserve capacity (brief 3.1.2 hypothesises 4-6). Deliberately here rather
    * than hardcoded: the brief says not to finalize it before playtesting.
    */
+  /**
+   * Emergency global object ceiling (rework brief 3.6).
+   *
+   * Not a balance mechanism. Per-blueprint limits used to gate crafts, which the
+   * brief argues suppressed the late-run power fantasy: the player assembles a
+   * self-feeding engine and then watches recipes refuse to fire. Objects now
+   * leave the field by their own nature -- a bomb detonates, a fire expires, a
+   * wall breaks -- and this ceiling exists only so a pathological economy cannot
+   * hang a frame. Reaching it is logged and counted, never silent.
+   */
+  maxRuntimeObjects: 220,
+
   reserveCap: 5,
 
   /** Seconds of fight time per encounter target (experience guide, not a timer). */

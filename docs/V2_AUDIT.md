@@ -231,13 +231,49 @@ Neither started nor faked:
 - **V2.9 Three authored test encounters** and the §3.10 test kit — **not started,
   and this is the biggest gap.** Without it, Focus is decorative on bastion, and
   the brief's test C cannot be satisfied on the shipped kits.
-- **§3.6 hard object limits** — untouched. Limits still gate crafts.
+- **§3.6 hard object limits** — done, and measured as a null result. See §13.
 - **§3.8–§3.9 content freeze** — all ten blueprints and all machine rules remain
   active. `SAW` continues to be barely used.
 - **Balance** — unchanged in intent: encounter length, boss cadence and reward
   quality are all pre-V2.
 
 ---
+
+## 13. §3.6 object limits: the brief's premise did not hold
+
+Brief §3.6 states that per-blueprint object limits "suppress the engine's late-run
+power fantasy" and should be replaced by natural object lifetimes. That is now
+implemented: crafts are no longer blocked by a per-blueprint cap, and a single
+emergency ceiling of 220 objects remains, which logs and counts when hit.
+
+Measured A/B, 12 seeds, crafts divided by fights actually played:
+
+| set | | crafts/encounter | fights | peak objects | cap hits | depth >= 3 | max depth |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| shipped | hard caps | 7.35 | 96 | 5 | 0 | 89/706 (12.6%) | 5 |
+| shipped | no caps | **7.54** | 96 | 6 | 0 | 99/724 (13.7%) | 5 |
+| test kit | hard caps | 7.39 | 36 | 7 | 0 | 17/266 (6.4%) | 3 |
+| test kit | no caps | 7.39 | 36 | 7 | 0 | 17/266 (6.4%) | 3 |
+
+**+2.6% on the shipped set and exactly 0% on the evaluation set.** Peak
+simultaneous objects is 5–7 against per-blueprint limits of 4–6, so the ceiling
+was barely touched, and the emergency cap was never reached at all.
+
+The real limit on the engine is the **letter economy**, not object count. Recipes
+are gated by sockets, sockets by how fast letters arrive, and letters by the bag
+interval and carrier drops. Removing a ceiling nobody reaches cannot unlock
+anything, which is what the measurement shows.
+
+The change is kept because the brief mandates it and it removes a latent failure
+mode for unusually greedy late builds. But it should not be credited with making
+the engine feel stronger, because measured, it did not.
+
+**A correction worth recording.** The first attempt to measure this compared 3
+encounters against 8 and produced a "+245% crafts" figure. That was wrong: it is
+the same divisor mistake that was fixed in the harness during V1, made again.
+Dividing by fights actually played collapsed the effect to single digits. The
+number never reached a document; the mistake is recorded because it is the kind
+that flatters a change rather than exposing it.
 
 ## 12. What I would do next, in order
 

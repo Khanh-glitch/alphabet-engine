@@ -99,6 +99,8 @@ export class Battle {
   /** V2 measurements required by brief 12.4. */
   readonly v2 = {
     crafts: 0,
+    /** Times the emergency object ceiling actually blocked a craft (brief 3.6). */
+    safetyCapHits: 0,
     bagOnlyCrafts: 0,
     combatFedCrafts: 0,
     wildcardsUsed: 0,
@@ -433,8 +435,21 @@ export class Battle {
     return n;
   }
 
-  atCapacity(bp: BlueprintDef): boolean {
-    return this.liveCount(bp.id) >= bp.limit;
+  /**
+   * Whether a craft is blocked.
+   *
+   * Brief 3.6 removes hard per-blueprint limits as a balancing tool: the natural
+   * lifetime of each object keeps the field readable, not a cap. Only the
+   * emergency global ceiling remains, and hitting it is counted and logged rather
+   * than quietly making a common recipe fail.
+   */
+  atCapacity(_bp: BlueprintDef): boolean {
+    if (this.entities.length >= TUNE.maxRuntimeObjects) {
+      this.v2.safetyCapHits += 1;
+      trace.log('craft', `chạm trần an toàn ${TUNE.maxRuntimeObjects} vật thể`);
+      return true;
+    }
+    return false;
   }
 
   private beginCraft(

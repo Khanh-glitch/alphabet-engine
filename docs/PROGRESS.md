@@ -3,6 +3,15 @@
 **Milestone:** M2 complete — systemic combat is in and verified. M3 (run
 buildcraft) is playable end-to-end.
 
+## §3.6 object limits
+
+Hard per-blueprint caps no longer gate crafts (rework brief 3.6). Only an emergency
+global ceiling of 220 objects remains, logged and counted when hit. Measured as a
+near-null result: +2.6% crafts per encounter on the shipped set, 0% on the
+evaluation set. `docs/V2_AUDIT.md` §13 records both the measurement and the reason
+the brief's premise does not hold in this build — the letter economy is the real
+constraint, not object count.
+
 ## What the repository contains
 
 A playable browser build of Alphabet Engine: title → kit select → 8 encounters

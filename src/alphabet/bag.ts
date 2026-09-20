@@ -67,11 +67,14 @@ export class LetterBag {
 
   /** Draw one tile; a new cycle is prepared once the current one is exhausted. */
   draw(): DrawResult {
-    const cycleStart = this.drawnThisCycle === 0;
+    // Refresh first: the draw that refills the bag IS the first draw of the new
+    // cycle, and rules keyed to `cycleStart` (first vowel echoed, chain reset)
+    // must fire on it.
     if (this.cursor >= this.queue.length) {
       this.cycle += 1;
       this.reshuffle();
     }
+    const cycleStart = this.drawnThisCycle === 0;
     const letter = this.queue[this.cursor];
     this.cursor += 1;
     this.drawnThisCycle += 1;

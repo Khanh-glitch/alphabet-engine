@@ -14,5 +14,8 @@ mono_crash.*.json
 node_modules/
 dist/
 tools/.build/
+
+# Local screenshot output from tools/shoot.mjs — inspect, do not commit
+.arena-shots/
 *.local
 .DS_Store

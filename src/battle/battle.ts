@@ -67,6 +67,9 @@ export class Battle {
   time = 0;
   chain = 0;
   bestChain = 0;
+  /** Time the bag last started a fresh cycle; drives the bag readout's pulse. */
+  cycleAt = -99;
+
   /** Time of the most recent craft — the HUD uses it to show a live chain. */
   lastCraftAt = -99;
   /** Set when a fresh bag cycle starts; a new cycle ends any live cascade. */
@@ -487,7 +490,10 @@ export class Battle {
     this.drawTimer = TUNE.drawInterval;
     const result = this.bag.draw();
     const entry = this.pool.add(result.letter, 'bag', this.time, true);
-    if (result.cycleStart) this.cycleSinceCraft = true;
+    if (result.cycleStart) {
+      this.cycleSinceCraft = true;
+      this.cycleAt = this.time;
+    }
     this.telemetry.onDraw();
     this.emit({ kind: 'draw', letter: result.letter, uid: entry.uid, source: 'bag' });
     this.fireDrawHooks(result);

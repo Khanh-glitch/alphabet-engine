@@ -1,7 +1,7 @@
 /** Pause overlay: the game keeps its context visible behind it. */
 import { C, R, T, VIEW } from '../../core/theme';
 
-import { t } from '../../core/i18n';
+import { loc, t } from '../../core/i18n';
 import { sfx } from '../../core/audio';
 import { RUN } from '../../content/encounters';
 import { label, plate, type Ctx } from '../../core/draw';
@@ -31,7 +31,7 @@ export function createPauseScreen(): Screen {
       const run = app.run;
       if (run) {
         const encounter = RUN[Math.min(run.state.encounterIndex, RUN.length - 1)];
-        label(g, `${run.kit.name.vi}`, x + w / 2, y + 96, {
+        label(g, loc(run.kit.name), x + w / 2, y + 96, {
           align: 'center',
           size: T.small,
           color: C.dim,
@@ -39,7 +39,7 @@ export function createPauseScreen(): Screen {
         });
         label(
           g,
-          `${t('wave')} ${run.state.encounterIndex + 1}/${RUN.length} · ${encounter.name.vi}`,
+          `${t('wave')} ${run.state.encounterIndex + 1}/${RUN.length} · ${loc(encounter.name)}`,
           x + w / 2,
           y + 120,
           { align: 'center', size: T.small, color: C.faint, weight: 600 },

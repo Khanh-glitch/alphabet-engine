@@ -69,7 +69,7 @@ export function createKitScreen(): Screen {
     label(g, loc(kit.tagline), x + 24, y + 62, { size: T.small, color: kit.color, weight: 700 });
 
     // Blueprint words
-    label(g, 'CÔNG THỨC', x + 24, y + 108, {
+    label(g, t('kitRecipes'), x + 24, y + 108, {
       size: T.micro,
       color: C.faint,
       weight: 800,
@@ -144,7 +144,7 @@ export function createKitScreen(): Screen {
     label(g, `? ${kit.wildcards}`, x + 120, y + 428, { size: T.tiny, color: C.violet, weight: 800 });
 
     app.ui.button(g, `kit.pick.${index}`, { x: x + CARD_W - 154, y: y + 406, w: 130, h: 42 }, {
-      label: isSel ? 'ĐÃ CHỌN' : t('choose'),
+      label: isSel ? t('chosen') : t('choose'),
       tone: kit.color,
       variant: isSel ? 'solid' : 'ghost',
       disabled: isSel,
@@ -187,7 +187,7 @@ export function createKitScreen(): Screen {
       app.ui.button(g, 'kit.seed', { x: 130, y: sy, w: 190, h: 40 }, {
         label: '',
         variant: 'bare',
-        tooltip: editingSeed ? 'Nhập mã rồi Enter' : 'Chạm để nhập mã ván',
+        tooltip: editingSeed ? t('seedEditing') : t('seedTap'),
       });
       app.ui.button(g, 'kit.random', { x: 336, y: sy, w: 132, h: 40 }, {
         label: t('random'),
@@ -223,7 +223,7 @@ export function createKitScreen(): Screen {
       }
       if (id === 'kit.seed') {
         editingSeed = true;
-        const input = window.prompt('Mã ván / Run seed', seedLabel(seed));
+        const input = window.prompt(t('seedPrompt'), seedLabel(seed));
         if (input) seed = seedFromLabel(input);
         editingSeed = false;
         return;

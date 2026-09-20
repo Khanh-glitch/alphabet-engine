@@ -155,7 +155,7 @@ export function createSpoilsScreen(): Screen {
       const bx = 200;
       const by = 560;
       well(g, bx - 20, by - 30, VIEW.w - 360, 190, R.lg);
-      label(g, 'DÂY CHUYỀN HIỆN TẠI', bx, by - 6, {
+      label(g, t('currentLine'), bx, by - 6, {
         size: T.micro,
         color: C.faint,
         weight: 800,
@@ -175,7 +175,7 @@ export function createSpoilsScreen(): Screen {
       });
 
       // Blueprints
-      label(g, 'CÔNG THỨC', bx, by + 96, {
+      label(g, t('kitRecipes'), bx, by + 96, {
         size: T.micro,
         color: C.faint,
         weight: 800,
@@ -190,7 +190,7 @@ export function createSpoilsScreen(): Screen {
       });
 
       // Rules
-      label(g, 'LUẬT MÁY', bx + 640, by + 96, {
+      label(g, t('codexRules'), bx + 640, by + 96, {
         size: T.micro,
         color: C.faint,
         weight: 800,
@@ -216,7 +216,7 @@ export function createSpoilsScreen(): Screen {
       });
 
       if (run.pendingRewards.length === 0) {
-        label(g, 'Không có lựa chọn nào — tiếp tục.', VIEW.w / 2, 300, {
+        label(g, t('noRewards'), VIEW.w / 2, 300, {
           align: 'center',
           size: T.lead,
           color: C.dim,

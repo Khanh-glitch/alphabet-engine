@@ -21,6 +21,22 @@ export interface Strings {
   quit: string;
   back: string;
   close: string;
+  navHint: string;
+  legendBag: string;
+  legendBlueprint: string;
+  legendRule: string;
+  starterSet: string;
+  kitRecipes: string;
+  currentLine: string;
+  coreDanger: string;
+  seedPrompt: string;
+  seedEditing: string;
+  seedTap: string;
+  chosen: string;
+  poolReadyCraft: string;
+  poolStillNeeds: string;
+  noWildTarget: string;
+  noRewards: string;
 
   // New run
   chooseKit: string;
@@ -120,6 +136,24 @@ export interface Strings {
   codexLocked: string;
   codexIntro: string;
 
+  // How to play
+  howTo: string;
+  howTitle: string;
+  howSubtitle: string;
+  howGoal: string;
+  howGoalValue: string;
+  how1Title: string;
+  how1Body: string;
+  how2Title: string;
+  how2Body: string;
+  how3Title: string;
+  how3Body: string;
+  how4Title: string;
+  how4Body: string;
+  howOk: string;
+  howSkip: string;
+  help: string;
+
   // Tutorial
   hintFirstCraft: string;
   hintCarrier: string;
@@ -148,6 +182,22 @@ const vi: Strings = {
   quit: 'THOÁT',
   back: 'QUAY LẠI',
   close: 'ĐÓNG',
+  navHint: 'Tab / Enter để chọn · Esc để quay lại',
+  legendBag: 'Chữ bạn sở hữu',
+  legendBlueprint: 'Từ ghép thành vật thể',
+  legendRule: 'Đổi cách dây chuyền chạy',
+  starterSet: 'BỘ TỪ KHỞI ĐẦU',
+  kitRecipes: 'CÔNG THỨC',
+  currentLine: 'DÂY CHUYỀN HIỆN TẠI',
+  coreDanger: 'LÕI NGUY HIỂM',
+  seedPrompt: 'Mã ván / Run seed',
+  seedEditing: 'Nhập mã rồi Enter',
+  seedTap: 'Chạm để nhập mã ván',
+  chosen: 'ĐÃ CHỌN',
+  poolReadyCraft: 'Đủ chữ — sẽ tự ghép',
+  poolStillNeeds: 'Còn thiếu: ',
+  noWildTarget: 'Không công thức nào thiếu đúng một chữ',
+  noRewards: 'Không có lựa chọn nào — tiếp tục.',
 
   chooseKit: 'CHỌN BỘ KHỞI ĐẦU',
   chooseKitHint: 'Mỗi bộ mở ra một cách chơi khác nhau. Chữ trong túi là nhiên liệu.',
@@ -239,6 +289,23 @@ const vi: Strings = {
   codexLocked: 'CHƯA MỞ',
   codexIntro: 'Mọi thứ bạn đã ghép, đã gặp và đã mở khoá.',
 
+  howTo: 'CÁCH CHƠI',
+  howTitle: 'CÁCH CHƠI',
+  howSubtitle: 'Dây chuyền tự chạy. Bạn chỉ can thiệp đúng lúc.',
+  howGoal: 'MỤC TIÊU',
+  howGoalValue: 'Giữ LÕI không vỡ · 8 trận',
+  how1Title: 'Chữ tự chảy về kho',
+  how1Body: 'Túi chữ nhả chữ xuống KHO CHỮ theo nhịp. Bạn không phải bấm gì.',
+  how2Title: 'Đủ chữ là tự ghép',
+  how2Body: 'Kho đủ chữ cho một CÔNG THỨC thì vật thể tự ra đời và tự đánh.',
+  how3Title: 'Hạ kẻ mang chữ',
+  how3Body: 'Kẻ địch mang chữ trên đầu. Hạ chúng để lấy chữ về kho.',
+  how4Title: 'Chữ ? là lượt của bạn',
+  how4Body: 'Khi bí, bấm CHỮ ? để điền đúng một chữ còn thiếu.',
+  howOk: 'ĐÃ HIỂU',
+  howSkip: 'Mở lại bất cứ lúc nào bằng nút ?',
+  help: 'CÁCH CHƠI',
+
   hintFirstCraft: 'Đủ chữ là tự ghép. Cứ để dây chuyền chạy.',
   hintCarrier: 'Kẻ địch mang chữ. Hạ nó để lấy chữ về kho.',
   hintWildcard: 'Chữ ? điền đúng một chữ còn thiếu. Chọn công thức.',
@@ -265,6 +332,22 @@ const en: Strings = {
   quit: 'QUIT',
   back: 'BACK',
   close: 'CLOSE',
+  navHint: 'Tab / Enter to select · Esc to go back',
+  legendBag: 'The letters you own',
+  legendBlueprint: 'Words that become objects',
+  legendRule: 'Change how the line runs',
+  starterSet: 'STARTING VOCABULARY',
+  kitRecipes: 'BLUEPRINTS',
+  currentLine: 'CURRENT LINE',
+  coreDanger: 'CORE CRITICAL',
+  seedPrompt: 'Run seed',
+  seedEditing: 'Type a code, then Enter',
+  seedTap: 'Tap to enter a run code',
+  chosen: 'CHOSEN',
+  poolReadyCraft: 'Covered — it will craft itself',
+  poolStillNeeds: 'Still needs: ',
+  noWildTarget: 'No blueprint is exactly one letter short',
+  noRewards: 'No offers left — carry on.',
 
   chooseKit: 'CHOOSE A STARTING KIT',
   chooseKitHint: 'Each kit builds a different engine. The letters in your bag are the fuel.',
@@ -355,6 +438,23 @@ const en: Strings = {
   codexSeen: 'SEEN',
   codexLocked: 'LOCKED',
   codexIntro: 'Everything you have crafted, fought and unlocked.',
+
+  howTo: 'HOW TO PLAY',
+  howTitle: 'HOW TO PLAY',
+  howSubtitle: 'The line runs itself. You intervene at the right moment.',
+  howGoal: 'GOAL',
+  howGoalValue: 'Keep the CORE intact · 8 fights',
+  how1Title: 'Letters arrive on their own',
+  how1Body: 'The bag feeds the POOL on a beat. You never press anything for this.',
+  how2Title: 'Full recipes craft themselves',
+  how2Body: 'When the pool covers a BLUEPRINT, the object appears and fights by itself.',
+  how3Title: 'Kill the carriers',
+  how3Body: 'Enemies carry letters over their heads. Kill them to feed the pool.',
+  how4Title: 'The ? is your turn',
+  how4Body: 'When you are stuck, press WILDCARD to fill exactly one missing letter.',
+  howOk: 'GOT IT',
+  howSkip: 'Reopen any time with the ? button',
+  help: 'HOW TO PLAY',
 
   hintFirstCraft: 'Full recipes craft themselves. Just keep the chain fed.',
   hintCarrier: 'Enemies carry letters. Kill them to feed your pool.',

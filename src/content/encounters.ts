@@ -54,8 +54,10 @@ export const RUN: EncounterDef[] = [
     kind: 'tutorial',
     hpMul: 1,
     speedMul: 1,
-    // One B is already in the pool, so the opening draw completes BOMB and the
-    // player sees word → object → kill → letter inside a few seconds.
+    // Prefixes of BOMB (B, O, M) are pre-loaded and the encounter guarantees
+    // the second B, so the first recipe completes within the opening seconds
+    // whether the bag or a carrier delivers it. The player sees
+    // word → object → kill → letter without being told a rule.
     openingPool: ['B', 'O', 'M'],
     waves: [
       { at: 0.31, kind: 'mote', count: 3, gap: 0.5, lane: 'spread' },

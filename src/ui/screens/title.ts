@@ -3,11 +3,13 @@
 
 import { C, R, T, VIEW } from '../../core/theme';
 import { chip, glow, label, plate, rgba, tile, type Ctx } from '../../core/draw';
-import { t } from '../../core/i18n';
+import { loc, t } from '../../core/i18n';
+import { H } from '../../core/strings';
 import type { Screen } from '../../app/app';
 import { BLUEPRINTS, STARTER_BLUEPRINTS } from '../../content/blueprints';
 
 import { store } from '../../core/save';
+import { createHowToScreen } from './howto';
 
 /** A slowly assembling word — the whole game in one looping animation. */
 const DEMO_WORD: (keyof typeof BLUEPRINTS)[] = ['BOMB', 'FIRE', 'OIL', 'WALL', 'BEE', 'FAN'];
@@ -81,7 +83,12 @@ export function createTitleScreen(): Screen {
     id: 'title',
     enter(app) {
       time = 0;
-      void app;
+      // First launch: teach the loop before the player has to make a decision.
+      if (!store.settings.seenHowto) {
+        store.settings.seenHowto = true;
+        store.saveSettings();
+        app.setOverlay(createHowToScreen(() => app.setOverlay(null)));
+      }
     },
     update(dt) {
       time += dt;
@@ -122,13 +129,13 @@ export function createTitleScreen(): Screen {
       g.lineTo(lx + 430, 366);
       g.stroke();
       label(g, t('gameTagline'), lx, 404, { size: T.lead, color: C.dim, weight: 500 });
-      label(g, 'Tab / Enter để chọn · Esc để quay lại', lx, 740, { size: T.micro, color: rgba(C.faint, 0.8), weight: 600 });
+      label(g, t('navHint'), lx, 740, { size: T.micro, color: rgba(C.faint, 0.8), weight: 600 });
 
       // Three pillars, stated once, plainly.
       const pillars: [string, string, string][] = [
-        ['TÚI CHỮ', 'Chữ bạn sở hữu', C.cyan],
-        ['CÔNG THỨC', 'Từ ghép thành vật thể', C.gold],
-        ['LUẬT MÁY', 'Đổi cách dây chuyền chạy', C.violet],
+        [H.bag.toUpperCase(), t('legendBag'), C.cyan],
+        [H.recipes, t('legendBlueprint'), C.gold],
+        [t('codexRules'), t('legendRule'), C.violet],
       ];
       pillars.forEach(([title, sub, tone], i) => {
         const y = 452 + i * 58;
@@ -168,9 +175,15 @@ export function createTitleScreen(): Screen {
         variant: 'ghost',
         tone: C.violet,
       });
+      by += 56;
+      app.ui.button(g, 'title.howto', { x: bx, y: by, w: bw, h: 46 }, {
+        label: t('howTo'),
+        variant: 'ghost',
+        tone: C.gold,
+      });
 
       // Starter set strip: the vocabulary the player will actually use
-      label(g, 'BỘ TỪ KHỞI ĐẦU', 890, 574, {
+      label(g, t('starterSet'), 890, 574, {
         size: T.micro,
         color: C.faint,
         weight: 800,
@@ -181,12 +194,13 @@ export function createTitleScreen(): Screen {
         const y = 592 + Math.floor(i / 3) * 80;
         plate(g, x, y, 104, 66, { radius: R.sm, fill: '#131b2e', edge: rgba(bp.color, 0.5), depth: 4 });
         label(g, bp.word, x + 52, y + 28, { align: 'center', size: T.tiny, color: C.ink, weight: 800, tracking: 1.6 });
-        label(g, bp.name.vi, x + 52, y + 50, { align: 'center', size: 11, color: bp.color, weight: 700 });
+        label(g, loc(bp.name), x + 52, y + 50, { align: 'center', size: 11, color: bp.color, weight: 700 });
       });
 
     },
     click(id, app) {
-      if (id === 'title.new') app.goto('kit');
+      if (id === 'title.howto') app.setOverlay(createHowToScreen(() => app.setOverlay(null)));
+      else if (id === 'title.new') app.goto('kit');
       else if (id === 'title.continue') app.goto('battle', { keepOverlay: false });
       else if (id === 'title.codex') app.goto('codex');
       else if (id === 'title.settings') app.goto('settings');

@@ -15,8 +15,8 @@
  */
 import { C, DECK, R, T, W, BP_COLOR } from '../core/theme';
 import { clamp, easeOut } from '../core/rng';
-import { glow, label, measure, plate, rgba, rr, tile, well, type Ctx, type Rect } from '../core/draw';
-import { loc } from '../core/i18n';
+import { glow, label, measure, mix, plate, rgba, rr, tile, well, type Ctx, type Rect } from '../core/draw';
+import { loc, t } from '../core/i18n';
 import { H } from '../core/strings';
 import type { Battle } from '../battle/battle';
 import type { BlueprintDef } from '../alphabet/types';
@@ -41,6 +41,24 @@ const STRIP: Rect = { x: 60, y: 14, w: 580, h: 68 };
 const CHAIN_BOX: Rect = { x: 656, y: 14, w: 112, h: 68 };
 const CONTROLS: Rect = { x: 784, y: 26, w: 196, h: 44 };
 const HINT: Rect = { x: 60, y: 92, w: 580, h: 38 };
+
+/**
+ * Truncates text to a pixel width with an ellipsis.
+ *
+ * Panels here have fixed geometry and the copy is localized, so any label that
+ * sits next to a counter or an icon has to be clipped by measurement rather than
+ * by hope.
+ */
+function fit(g: Ctx, text: string, maxW: number, size: number, weight: number): string {
+  if (measure(g, text, { size, weight }) <= maxW) return text;
+  const chars = [...text];
+  while (chars.length > 1) {
+    chars.pop();
+    const test = `${chars.join('')}…`;
+    if (measure(g, test, { size, weight }) <= maxW) return test;
+  }
+  return '…';
+}
 
 /**
  * A recipe position is either covered by the pool or missing. Walking the word
@@ -280,7 +298,7 @@ function poolTray(g: Ctx, battle: Battle, time: number): void {
 }
 
 /** Bag readout: the player's raw economy and how much of the cycle is left. */
-function bagBox(g: Ctx, battle: Battle): void {
+function bagBox(g: Ctx, battle: Battle, time: number): void {
   well(g, BAGBOX.x, BAGBOX.y, BAGBOX.w, BAGBOX.h, R.md);
   label(g, H.bag, BAGBOX.x + 14, BAGBOX.y + 20, {
     size: T.micro,
@@ -290,6 +308,10 @@ function bagBox(g: Ctx, battle: Battle): void {
   });
   const remain = battle.bag.remaining;
   const total = Math.max(1, battle.bag.size);
+  // A fresh cycle is a systemic beat: it refills the bag and cuts the current
+  // cascade, so it gets a moment of light rather than passing silently.
+  const since = Math.min(1, Math.max(0, (time - battle.cycleAt) / 0.9));
+  const pulse = since < 1 ? 1 - since : 0;
   label(g, `${H.cycle} ${battle.bag.cycleIndex + 1}`, BAGBOX.x + 14, BAGBOX.y + 40, {
     size: T.tiny,
     color: C.dim,
@@ -306,7 +328,13 @@ function bagBox(g: Ctx, battle: Battle): void {
   g.fillStyle = rgba('#000000', 0.45);
   rr(g, trackX, BAGBOX.y + 50, trackW, 12, 6);
   g.fill();
-  g.fillStyle = C.cyan;
+  if (pulse > 0) {
+    g.strokeStyle = rgba(C.gold, 0.35 + pulse * 0.6);
+    g.lineWidth = 2;
+    rr(g, BAGBOX.x - 1, BAGBOX.y - 1, BAGBOX.w + 2, BAGBOX.h + 2, R.md + 1);
+    g.stroke();
+  }
+  g.fillStyle = pulse > 0 ? mix(C.cyan, C.gold, pulse) : C.cyan;
   rr(g, trackX, BAGBOX.y + 50, Math.max(6, trackW * (remain / total)), 12, 6);
   g.fill();
 }
@@ -337,27 +365,32 @@ function wildcard(g: Ctx, ui: Ui, battle: Battle, time: number, inter: HudIntera
   });
 
   const tx = WILD_RECT.x + 68;
-  label(g, `${left}`, WILD_RECT.x + WILD_RECT.w - 14, WILD_RECT.y + 32, {
-    size: T.head,
-    color: left > 0 ? C.ink : C.faint,
-    align: 'right',
-    weight: 800,
-  });
+  // The charge counter owns the right end of the plate, so the detail lines are
+  // laid out against a width that stops short of it — otherwise a long
+  // "no recipe needs one letter" line runs under the number and off the screen.
+  const countW = 44;
+  const textW = WILD_RECT.x + WILD_RECT.w - 14 - countW - tx;
   const detail =
     left <= 0
       ? H.wildSpent
       : battle.targets.length > 0
         ? `${battle.targets[0].blueprint.word} ${H.needLetter}${battle.targets[0].missing}`
         : H.wildWaiting;
-  label(g, detail, tx, WILD_RECT.y + 30, {
+  label(g, fit(g, detail, textW, T.small, 800), tx, WILD_RECT.y + 30, {
     size: T.small,
     color: left > 0 ? C.ink : C.faint,
     weight: 800,
   });
-  label(g, H.wildReady, tx, WILD_RECT.y + 52, {
+  label(g, fit(g, H.wildReady, textW, T.micro, 700), tx, WILD_RECT.y + 52, {
     size: T.micro,
     color: left > 0 && battle.targets.length > 0 ? C.violet : C.faint,
     weight: 700,
+  });
+  label(g, `${left}`, WILD_RECT.x + WILD_RECT.w - 14, WILD_RECT.y + 32, {
+    size: T.head,
+    color: left > 0 ? C.ink : C.faint,
+    align: 'right',
+    weight: 800,
   });
 
   if (hover.hover && left > 0) {
@@ -519,6 +552,8 @@ export interface HudOptions {
   hint: string | null;
   /** Teaching hint is emphasised and stays longer. */
   hintEmphasis: boolean;
+  /** What the current hint points at, so the lesson is anchored to the UI. */
+  hintTarget?: 'pool' | 'recipes' | 'carriers' | 'wildcard' | null;
 }
 
 export function drawHud(g: Ctx, ui: Ui, battle: Battle, opts: HudOptions): void {
@@ -554,7 +589,7 @@ export function drawHud(g: Ctx, ui: Ui, battle: Battle, opts: HudOptions): void 
     blueprintCard(g, battle, battle.slots[slot], slot, opts.time, inter);
   }
   incomingPanel(g, battle);
-  bagBox(g, battle);
+  bagBox(g, battle, opts.time);
   poolTray(g, battle, opts.time);
   wildcard(g, ui, battle, opts.time, inter);
   encounterStrip(g, battle, opts.waveIndex, opts.waveTotal);
@@ -567,9 +602,45 @@ export function drawHud(g: Ctx, ui: Ui, battle: Battle, opts: HudOptions): void 
     edge: C.lineHi,
     depth: 3,
   });
-  controlButton(g, ui, 'hud.speed', { x: CONTROLS.x + 6, y: CONTROLS.y + 6, w: 92, h: 32 }, `${opts.speed}×`, C.cyan, H.speedTip);
-  controlButton(g, ui, 'hud.pause', { x: CONTROLS.x + 104, y: CONTROLS.y + 6, w: 86, h: 32 }, 'II', C.gold, H.pauseTip);
+  controlButton(g, ui, 'hud.speed', { x: CONTROLS.x + 6, y: CONTROLS.y + 6, w: 78, h: 32 }, `${opts.speed}×`, C.cyan, H.speedTip);
+  controlButton(g, ui, 'hud.help', { x: CONTROLS.x + 90, y: CONTROLS.y + 6, w: 44, h: 32 }, '?', C.mint, t('howTo'));
+  controlButton(g, ui, 'hud.pause', { x: CONTROLS.x + 140, y: CONTROLS.y + 6, w: 50, h: 32 }, 'II', C.gold, H.pauseTip);
 
+  if (opts.hint && opts.hintTarget) {
+    // Spotlight the element the hint is talking about. A ring around the real
+    // panel teaches far better than a line of text floating on its own.
+    const target: Rect | null =
+      opts.hintTarget === 'pool'
+        ? TRAY
+        : opts.hintTarget === 'recipes'
+          ? { x: CARD.x, y: CARD.y, w: CARD.w * 3 + CARD.gap * 2, h: CARD.h }
+          : opts.hintTarget === 'wildcard'
+            ? WILD_RECT
+            : null;
+    if (target) {
+      const pulse = 0.5 + Math.sin(opts.time * 4) * 0.5;
+      g.save();
+      g.strokeStyle = rgba(C.gold, 0.35 + pulse * 0.45);
+      g.lineWidth = 3;
+      rr(g, target.x - 6, target.y - 6, target.w + 12, target.h + 12, R.md + 6);
+      g.stroke();
+      // A soft halo, so the eye is pulled without the panel being obscured.
+      const halo = g.createRadialGradient(
+        target.x + target.w / 2,
+        target.y + target.h / 2,
+        Math.min(target.w, target.h) * 0.3,
+        target.x + target.w / 2,
+        target.y + target.h / 2,
+        Math.max(target.w, target.h) * 0.62,
+      );
+      halo.addColorStop(0, rgba(C.gold, 0.09 + pulse * 0.06));
+      halo.addColorStop(1, rgba(C.gold, 0));
+      g.fillStyle = halo;
+      rr(g, target.x - 30, target.y - 30, target.w + 60, target.h + 60, R.lg);
+      g.fill();
+      g.restore();
+    }
+  }
   if (opts.hint) {
     const a = opts.hintEmphasis ? 1 : 0.92;
     g.save();

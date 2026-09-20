@@ -8,7 +8,8 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "shot": "node tools/shoot.mjs shot",
-    "sim": "node tools/shoot.mjs sim"
+    "sim": "node tools/shoot.mjs sim",
+    "test": "node tools/test.mjs"
   },
   "repository": {
     "type": "git",

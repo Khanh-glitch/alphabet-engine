@@ -111,18 +111,18 @@ export const FIELD = {
   w: VIEW.w,
   h: VIEW.h,
   /** Near edge of the floor plane. */
-  floorFront: 600,
+  floorFront: 604,
   /** Far edge of the floor plane. */
-  floorBack: 372,
+  floorBack: 300,
   lanes: 5,
   /** Vertical gap between lane baselines. */
-  laneH: 42,
+  laneH: 50,
   /** The player's engine sits here. */
   coreX: 176,
   /** Enemies enter from beyond this x. */
   spawnX: 1520,
   /** Where a ground unit's feet rest in the nearest lane. */
-  groundY: 556,
+  groundY: 574,
   left: 56,
   right: 1408,
   top: 84,

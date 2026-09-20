@@ -17,6 +17,7 @@ import { RUN } from '../../content/encounters';
 import { FxLayer } from '../../render/fx';
 import { drawArena } from '../../render/arena';
 import { drawHud, cardRect } from '../battleHud';
+import { openHowTo } from './howto';
 import type { Screen } from '../../app/app';
 
 const STEP = 1 / 120;
@@ -29,6 +30,7 @@ export function createBattleScreen(): Screen {
   let endTimer = -1;
   let hintT = 0;
   let hint: string | null = null;
+  let hintTarget: 'pool' | 'recipes' | 'carriers' | 'wildcard' | null = null;
 
   /** Wrap text to a pixel width — used by the inspect panel and hints. */
   const wrap = (g: Ctx, text: string, maxW: number): string[] => {
@@ -62,6 +64,7 @@ export function createBattleScreen(): Screen {
       endTimer = -1;
       hintT = 0;
       hint = null;
+      hintTarget = null;
       inspectSlot = null;
       wildcardMode = false;
     },
@@ -123,15 +126,21 @@ export function createBattleScreen(): Screen {
         const enc = battle.cfg.encounter;
         if (battle.telemetry.data.crafts === 0 && enc.teaches === 'craft') {
           hint = t('hintFirstCraft');
-          hintT = 6;
+          // Point at the recipes while they are still filling: the player needs
+          // to know *where* the craft happens, not just that it will.
+          hintTarget = battle.pool.size > 1 ? 'recipes' : 'pool';
+          hintT = 7;
         } else if (battle.telemetry.data.kills < 2 && battle.enemies.some((e) => e.carry)) {
           hint = t('hintCarrier');
-          hintT = 6;
+          hintTarget = 'carriers';
+          hintT = 7;
         } else if (battle.wildcardsLeft > 0 && battle.targets.length > 0) {
           hint = t('hintWildcard');
-          hintT = 5;
+          hintTarget = 'wildcard';
+          hintT = 6;
         } else {
           hint = null;
+          hintTarget = null;
         }
       }
 
@@ -195,6 +204,7 @@ export function createBattleScreen(): Screen {
         waveTotal: RUN.length,
         hint: hint && hintT > 0 ? hint : null,
         hintEmphasis: hintT > 1,
+        hintTarget: hint && hintT > 0 ? hintTarget : null,
       });
 
       fx.drawOverlay(g);
@@ -219,7 +229,7 @@ export function createBattleScreen(): Screen {
           const missing = battle.pool.missing(bp.recipe);
           label(
             g,
-            missing.length === 0 ? 'Đủ chữ — sẽ tự ghép' : `Còn thiếu: ${missing.join(' ')}`,
+            missing.length === 0 ? t('poolReadyCraft') : `${t('poolStillNeeds')}${missing.join(' ')}`,
             px + 14,
             py + 140,
             { size: 12, color: missing.length === 0 ? C.mint : C.gold, weight: 700 },
@@ -235,7 +245,7 @@ export function createBattleScreen(): Screen {
         plate(g, x, y, w, 44, { radius: 10, fill: '#241a44', edge: C.violet, depth: 5 });
         label(
           g,
-          eligible.length > 0 ? t('wildcardPick') : 'Không công thức nào thiếu đúng một chữ',
+          eligible.length > 0 ? t('wildcardPick') : t('noWildTarget'),
           x + w / 2,
           y + 28,
           { size: 15, color: C.ink, align: 'center', weight: 700 },
@@ -280,6 +290,7 @@ export function createBattleScreen(): Screen {
     click(id, app) {
       const battle = app.battle;
       if (!battle) return;
+      if (id === 'hud.help') openHowTo(app);
       if (id === 'hud.pause') {
         void import('./pause').then((m) => app.setOverlay(m.createPauseScreen()));
         return;

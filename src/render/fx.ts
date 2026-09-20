@@ -171,7 +171,7 @@ export class FxLayer {
         case 'chain':
           this.texts.push({
             x: FIELD.w / 2,
-            y: 210,
+            y: FIELD.floorBack + 62,
             text: `×${ev.depth}`,
             color: ev.depth >= 4 ? C.rose : ev.depth >= 3 ? C.violet : C.cyan,
             life: 1.0,

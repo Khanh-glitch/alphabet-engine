@@ -6,9 +6,10 @@
  * visibly stands on the ground and the letters they carry stay the clearest
  * thing on screen.
  */
-import { C, FIELD, laneY, laneScale, laneFloor, BP_COLOR } from '../core/theme';
+import { C, F, FIELD, laneY, laneScale, laneFloor, BP_COLOR } from '../core/theme';
+import { t as tr } from '../core/i18n';
 import { clamp } from '../core/rng';
-import { glow, label, mix, plate, rgba, rr, tile, type Ctx } from '../core/draw';
+import { glow, hazardStripes, label, mix, plate, rgba, rr, tile, type Ctx } from '../core/draw';
 import type { Battle } from '../battle/battle';
 import type { Enemy, Entity } from '../battle/types';
 import { ENEMIES } from '../content/enemies';
@@ -17,68 +18,237 @@ const FLOOR_BACK = FIELD.floorBack;
 const FLOOR_FRONT = FIELD.floorFront;
 const CORE_COLOR = C.cyan;
 
-/** Back wall: machinery silhouettes the arena is set inside. */
+/**
+ * Presentation-only size multiplier for battlefield units.
+ *
+ * Enemy `size` is a simulation value — it feeds collision and targeting — so it
+ * is deliberately left alone and the *drawing* is scaled up instead. Units read
+ * as substantial machines at the arena's real resolution without changing how
+ * anything hits.
+ */
+const UNIT = 1.35;
+
+/** Deterministic pseudo-random in [0,1) from an integer — background dressing only. */
+function noise(n: number): number {
+  const s = Math.sin(n * 12.9898) * 43758.5453;
+  return s - Math.floor(s);
+}
+
+/**
+ * The factory hall behind the arena.
+ *
+ * This is the game's thesis rendered as a place: letters are *manufactured*, so
+ * the wall is a working letterpress line — a hopper overhead, a conveyor of
+ * finished tiles, pipework carrying stock, and the dark gantries above it all.
+ * It exists to give the play band a sense of depth and scale, so it is built in
+ * four receding layers and kept low-contrast beneath the units.
+ */
 function backWall(g: Ctx, t: number): void {
   const grad = g.createLinearGradient(0, 0, 0, FLOOR_BACK + 40);
-  grad.addColorStop(0, '#070a13');
-  grad.addColorStop(0.7, '#0b111e');
-  grad.addColorStop(1, '#0e1526');
+  grad.addColorStop(0, '#05070f');
+  grad.addColorStop(0.45, '#080d1a');
+  grad.addColorStop(1, '#0d1526');
   g.fillStyle = grad;
   g.fillRect(0, 0, FIELD.w, FLOOR_BACK + 40);
 
-  // Structural pillars
+  // --- layer 1: far gantries, almost lost in the dark ---------------------
+  g.save();
+  for (let i = 0; i < 5; i++) {
+    const x = 120 + i * 330;
+    g.fillStyle = '#070b16';
+    g.fillRect(x, 96, 210, FLOOR_BACK - 96);
+    g.fillStyle = rgba('#000000', 0.35);
+    g.fillRect(x + 210, 96, 26, FLOOR_BACK - 96);
+  }
+  // Roof trusses
+  g.strokeStyle = rgba(C.lineHi, 0.1);
+  g.lineWidth = 3;
+  for (let i = 0; i < 11; i++) {
+    const x = 60 + i * 138;
+    g.beginPath();
+    g.moveTo(x, 0);
+    g.lineTo(x + 60, 58);
+    g.lineTo(x + 120, 0);
+    g.stroke();
+  }
+  g.restore();
+
+  // --- layer 2: the letter line ------------------------------------------
+  // Hopper: raw stock waiting to be pressed into tiles.
+  g.save();
+  g.fillStyle = '#0b1220';
+  g.beginPath();
+  g.moveTo(880, 52);
+  g.lineTo(1160, 52);
+  g.lineTo(1122, 128);
+  g.lineTo(918, 128);
+  g.closePath();
+  g.fill();
+  g.strokeStyle = rgba(C.lineHi, 0.35);
+  g.lineWidth = 2;
+  g.stroke();
+  // Stock inside the hopper — a slow settling pile of raw letterforms.
+  g.save();
+  g.beginPath();
+  g.moveTo(880, 52);
+  g.lineTo(1160, 52);
+  g.lineTo(1122, 128);
+  g.lineTo(918, 128);
+  g.closePath();
+  g.clip();
+  for (let i = 0; i < 14; i++) {
+    const nx = noise(i * 3.3);
+    const ny = noise(i * 7.7 + 11);
+    const bob = Math.sin(t * 0.9 + i) * 2.5;
+    const x = 906 + nx * 222;
+    const y = 60 + ny * 52 + bob;
+    g.save();
+    g.translate(x, y);
+    g.rotate((noise(i * 5.1) - 0.5) * 0.9);
+    g.fillStyle = rgba(C.tileFace, 0.09 + ny * 0.08);
+    rr(g, -9, -6, 18, 12, 2);
+    g.fill();
+    g.restore();
+  }
+  g.restore();
+  g.restore();
+
+  // Conveyor: finished tiles ride toward the drop into the arena.
+  g.save();
+  const beltY = 150;
+  g.fillStyle = '#0a1020';
+  g.fillRect(560, beltY, 860, 26);
+  g.fillStyle = rgba('#000000', 0.4);
+  g.fillRect(560, beltY + 20, 860, 6);
+  g.strokeStyle = rgba(C.lineHi, 0.3);
+  g.lineWidth = 1;
+  g.beginPath();
+  g.moveTo(560, beltY);
+  g.lineTo(1420, beltY);
+  g.stroke();
+
+  // Rollers, turning.
+  for (let i = 0; i < 22; i++) {
+    const x = 580 + i * 40;
+    const spin = (t * 1.6 + i * 0.6) % 1;
+    g.fillStyle = rgba(C.lineHi, 0.5);
+    g.beginPath();
+    g.arc(x, beltY + 24, 5, 0, Math.PI * 2);
+    g.fill();
+    g.strokeStyle = rgba(C.lineHi, 0.85);
+    g.lineWidth = 1.4;
+    g.beginPath();
+    g.moveTo(x - Math.cos(spin * 6.28) * 4, beltY + 24 - Math.sin(spin * 6.28) * 4);
+    g.lineTo(x + Math.cos(spin * 6.28) * 4, beltY + 24 + Math.sin(spin * 6.28) * 4);
+    g.stroke();
+  }
+
+  // The tiles themselves, looping along the belt. They fade in at the hopper
+  // and fall out of view at the right, so the belt always looks like it is
+  // delivering stock toward the player's side.
+  for (let i = 0; i < 9; i++) {
+    const speed = 46;
+    const span = 900;
+    const x = 640 + ((i * 110 + t * speed) % span);
+    if (x > 1410) continue;
+    g.save();
+    g.globalAlpha = clamp((1400 - x) / 90, 0, 1) * 0.26;
+    tile(g, x - 15, beltY - 30, 30, LETTERS_BELT[(i + Math.floor(t * speed / 110)) % LETTERS_BELT.length], 'filled');
+    g.restore();
+  }
+  g.restore();
+  void (beltY && noise(-1));
+
+  // --- layer 3: pipework carrying glowing stock ---------------------------
+  g.save();
+  const pipes: Array<[number, number, string, number]> = [
+    [78, 4, C.cyan, 0.3],
+    [92, 8, C.cyan, 0.2],
+    [300, 6, C.ember, 0.24],
+  ];
+  for (const [y, w, color, a] of pipes) {
+    g.strokeStyle = rgba(C.lineHi, 0.22);
+    g.lineWidth = w + 6;
+    g.beginPath();
+    g.moveTo(0, y);
+    g.lineTo(FIELD.w, y);
+    g.stroke();
+    // Pulse travelling down the pipe: the line is live.
+    const phase = ((t * 0.28) % 1) * FIELD.w;
+    const px = phase;
+    const flow = g.createLinearGradient(px - 200, 0, px + 200, 0);
+    flow.addColorStop(0, rgba(color, 0));
+    flow.addColorStop(0.5, rgba(color, a));
+    flow.addColorStop(1, rgba(color, 0));
+    g.strokeStyle = flow;
+    g.lineWidth = w;
+    g.beginPath();
+    g.moveTo(0, y);
+    g.lineTo(FIELD.w, y);
+    g.stroke();
+  }
+  g.restore();
+
+  // --- layer 4: near structures, columns and lamps ------------------------
   g.save();
   for (let i = 0; i < 8; i++) {
     const x = 40 + i * 186;
     const w = 58;
-    g.fillStyle = '#0d1524';
+    g.fillStyle = '#090f1c';
     g.fillRect(x, 40, w, FLOOR_BACK - 20);
-    g.fillStyle = rgba('#ffffff', 0.03);
+    g.fillStyle = rgba('#ffffff', 0.035);
     g.fillRect(x, 40, 3, FLOOR_BACK - 20);
-    // rivet plates
+    g.fillStyle = rgba('#000000', 0.3);
+    g.fillRect(x + w - 5, 40, 5, FLOOR_BACK - 20);
     for (let j = 0; j < 4; j++) {
-      g.fillStyle = rgba(C.lineHi, 0.18);
+      g.fillStyle = rgba(C.lineHi, 0.1);
       g.fillRect(x + 8, 70 + j * 60, w - 16, 4);
+      g.fillStyle = rgba(C.lineHi, 0.3);
+      g.beginPath();
+      g.arc(x + 12, 74 + j * 60, 2, 0, Math.PI * 2);
+      g.arc(x + w - 12, 74 + j * 60, 2, 0, Math.PI * 2);
+      g.fill();
     }
   }
-  // Overhead pipework
-  g.strokeStyle = rgba(C.lineHi, 0.22);
-  g.lineWidth = 10;
-  g.beginPath();
-  g.moveTo(0, 46);
-  g.lineTo(FIELD.w, 46);
-  g.stroke();
-  g.lineWidth = 6;
-  g.beginPath();
-  g.moveTo(0, 62);
-  g.lineTo(FIELD.w, 62);
-  g.stroke();
-  // A slow turning gear to give the space life
+
+  // A slow turning gear, and a second counter-rotating one behind it.
   g.save();
-  g.translate(1180, 168);
-  g.rotate(t * 0.1);
-  g.strokeStyle = rgba(C.lineHi, 0.16);
-  g.lineWidth = 12;
-  g.beginPath();
-  g.arc(0, 0, 92, 0, Math.PI * 2);
-  g.stroke();
-  for (let i = 0; i < 14; i++) {
-    g.rotate((Math.PI * 2) / 14);
+  const gear = (cx: number, cy: number, r: number, teeth: number, dir: number, alpha: number): void => {
+    g.save();
+    g.translate(cx, cy);
+    g.rotate(t * 0.1 * dir);
+    g.strokeStyle = rgba(C.lineHi, alpha);
+    g.lineWidth = 12;
     g.beginPath();
-    g.moveTo(92, 0);
-    g.lineTo(116, 0);
+    g.arc(0, 0, r, 0, Math.PI * 2);
     g.stroke();
-  }
+    for (let i = 0; i < teeth; i++) {
+      g.rotate((Math.PI * 2) / teeth);
+      g.beginPath();
+      g.moveTo(r, 0);
+      g.lineTo(r + 24, 0);
+      g.stroke();
+    }
+    g.restore();
+  };
+  gear(1180, 226, 84, 14, 1, 0.1);
+  gear(1318, 186, 50, 10, -1, 0.07);
   g.restore();
-  // Warm hazard lamp
+
+  // Hazard lamps hanging over the lane the enemies walk in from.
   const lamp = 0.55 + Math.sin(t * 1.6) * 0.45;
   glow(g, 300, 96, 90, C.ember, 0.1 + lamp * 0.06);
   g.fillStyle = rgba(C.ember, 0.35 + lamp * 0.35);
   g.beginPath();
   g.arc(300, 96, 7, 0, Math.PI * 2);
   g.fill();
+  g.fillStyle = 'rgba(0,0,0,0.5)';
+  g.fillRect(292, 74, 16, 14);
   g.restore();
 }
+
+/** The letters the decorative conveyor cycles through. */
+const LETTERS_BELT = ['A', 'L', 'P', 'H', 'B', 'E', 'T', 'M', 'O', 'R', 'S', 'I'];
 
 /**
  * The floor plane.
@@ -94,6 +264,20 @@ function floor(g: Ctx, t: number): void {
   grad.addColorStop(1, '#1a233c');
   g.fillStyle = grad;
   g.fillRect(0, FLOOR_BACK, FIELD.w, FLOOR_FRONT - FLOOR_BACK);
+
+  // Plates: the floor is decking, so it gets seams that converge toward the
+  // vanishing point. They are the main reason the plane reads as *ground*.
+  g.save();
+  g.strokeStyle = rgba('#ffffff', 0.028);
+  g.lineWidth = 1;
+  const vpX = 430;
+  for (let x = -600; x < FIELD.w + 600; x += 150) {
+    g.beginPath();
+    g.moveTo(vpX + (x - vpX) * 0.72, FLOOR_BACK);
+    g.lineTo(x, FLOOR_FRONT);
+    g.stroke();
+  }
+  g.restore();
 
   // Depth bands + lane rails
   for (let i = 0; i < FIELD.lanes; i++) {
@@ -113,6 +297,15 @@ function floor(g: Ctx, t: number): void {
     g.stroke();
     g.setLineDash([]);
   }
+
+  // Warm light pooling on the deck from the lamps above, so the near lanes do
+  // not go flat black where the action actually happens.
+  const pool = g.createLinearGradient(0, FLOOR_BACK, 0, FLOOR_FRONT);
+  pool.addColorStop(0, rgba(C.cyan, 0.0));
+  pool.addColorStop(0.55, rgba(C.steel, 0.035));
+  pool.addColorStop(1, rgba(C.ember, 0.045));
+  g.fillStyle = pool;
+  g.fillRect(0, FLOOR_BACK, FIELD.w, FLOOR_FRONT - FLOOR_BACK);
 
   // Back edge: hazard chevrons mark the side enemies walk in from.
   g.save();
@@ -153,13 +346,59 @@ function haze(g: Ctx): void {
   g.fillRect(0, FLOOR_BACK - 10, FIELD.w, 110);
 }
 
-/** Contact shadow — the single strongest cue that a unit is standing on the floor. */
+/**
+ * Focus pass. Drawn over the arena, under the HUD.
+ *
+ * The scene is busy by design — a working factory — so this pulls the eye down
+ * onto the play band: the far wall is graded darker, the near corners fall off,
+ * and a faint warm bloom sits over the middle of the floor where fights happen.
+ */
+function focus(g: Ctx): void {
+  // Far wall falls away from the light.
+  const wall = g.createLinearGradient(0, 0, 0, FLOOR_BACK);
+  wall.addColorStop(0, rgba('#04060c', 0.42));
+  wall.addColorStop(0.62, rgba('#04060c', 0.18));
+  wall.addColorStop(1, rgba('#04060c', 0));
+  g.fillStyle = wall;
+  g.fillRect(0, 0, FIELD.w, FLOOR_BACK);
+
+  // Corner falloff over the whole battlefield.
+  const vg = g.createRadialGradient(
+    FIELD.w * 0.5,
+    FLOOR_BACK + (FLOOR_FRONT - FLOOR_BACK) * 0.45,
+    180,
+    FIELD.w * 0.5,
+    FLOOR_BACK + (FLOOR_FRONT - FLOOR_BACK) * 0.45,
+    FIELD.w * 0.72,
+  );
+  vg.addColorStop(0, 'rgba(0,0,0,0)');
+  vg.addColorStop(0.7, 'rgba(0,0,0,0.1)');
+  vg.addColorStop(1, 'rgba(0,0,0,0.32)');
+  g.fillStyle = vg;
+  g.fillRect(0, 0, FIELD.w, FIELD.bottom + 8);
+}
+
+/**
+ * Contact shadow — the single strongest cue that a unit is standing on the
+ * floor.
+ *
+ * Drawn as a soft radial pool *at the foot line*, not as a hard ellipse: a hard
+ * ellipse reads as a puddle under the unit rather than as ground occlusion.
+ */
 function contact(g: Ctx, x: number, lane: number, size: number, strength = 0.4): void {
   const y = laneFloor(lane);
+  const rx = size * 0.92;
+  const ry = Math.max(3, size * 0.26);
   g.save();
-  g.fillStyle = rgba('#000000', strength);
+  g.translate(x, y);
+  g.scale(1, ry / rx);
+  const grad = g.createRadialGradient(0, 0, 0, 0, 0, rx);
+  grad.addColorStop(0, rgba('#000000', strength));
+  grad.addColorStop(0.55, rgba('#000000', strength * 0.55));
+  grad.addColorStop(1, rgba('#000000', 0));
+  g.fillStyle = grad;
   g.beginPath();
-  g.ellipse(x, y, size * 1.15, size * 0.34, 0, 0, Math.PI * 2);
+  g.arc(0, 0, rx, 0, Math.PI * 2);
   g.fill();
   g.restore();
 }
@@ -172,61 +411,121 @@ function core(g: Ctx, battle: Battle, t: number): void {
   const danger = pct < 0.34;
   const pulse = 0.6 + Math.sin(t * (danger ? 7 : 2.4)) * 0.4;
   const accent = danger ? C.bad : CORE_COLOR;
+  const hullW = 190;
+  const hullH = 150;
+  const hullX = x - 84;
+  const hullY = baseY - 158;
 
-  contact(g, x + 10, lane, 96, 0.42);
-  glow(g, x - 20, baseY - 60, 190, accent, 0.1 + pulse * 0.05);
+  contact(g, x + 10, lane, 104, 0.45);
+  glow(g, x - 20, baseY - 62, 200, accent, 0.1 + pulse * 0.05);
 
-  // Floor plate the machine is bolted to
-  g.fillStyle = '#0d1424';
-  rr(g, x - 108, baseY - 6, 224, 22, 5);
+  // --- the plinth it is bolted to ---------------------------------------
+  g.fillStyle = '#080d18';
+  rr(g, x - 112, baseY - 10, 232, 26, 6);
   g.fill();
-  g.fillStyle = rgba(C.lineHi, 0.5);
+  g.fillStyle = '#0f1728';
+  rr(g, x - 106, baseY - 8, 220, 20, 5);
+  g.fill();
+  g.fillStyle = rgba(C.lineHi, 0.4);
   for (let i = 0; i < 5; i++) {
     g.beginPath();
-    g.arc(x - 88 + i * 44, baseY + 5, 3, 0, Math.PI * 2);
+    g.arc(x - 88 + i * 44, baseY + 2, 3.4, 0, Math.PI * 2);
     g.fill();
   }
+  hazardStripes(g, x - 106, baseY - 22, 220, 12, C.gold);
 
-  // Housing
-  plate(g, x - 84, baseY - 158, 186, 152, { radius: 14, fill: '#1a2540', edge: C.lineHi, depth: 7 });
-  for (let i = 0; i < 6; i++) {
-    g.fillStyle = rgba(C.lineHi, 0.55);
-    g.beginPath();
-    g.arc(x - 70 + i * 32, baseY - 146, 3, 0, Math.PI * 2);
-    g.fill();
-  }
-
-  // Reactor eye
-  const eyeY = baseY - 92;
-  glow(g, x + 6, eyeY, 66 + pulse * 14, accent, 0.45 * pulse);
-  g.fillStyle = '#060a12';
-  g.beginPath();
-  g.arc(x + 6, eyeY, 36, 0, Math.PI * 2);
+  // --- body ---------------------------------------------------------------
+  plate(g, hullX, hullY, hullW, hullH, { radius: 16, fill: '#1b2642', edge: C.lineHi, depth: 8 });
+  // Faceplate with an inset panel.
+  g.fillStyle = '#131c30';
+  rr(g, hullX + 10, hullY + 10, hullW - 20, hullH - 20, 12);
   g.fill();
+  // Rivets along the top and bottom rails.
+  g.fillStyle = rgba(C.lineHi, 0.7);
+  for (let i = 0; i < 6; i++) {
+    g.beginPath();
+    g.arc(hullX + 22 + i * 29, hullY + 14, 2.6, 0, Math.PI * 2);
+    g.arc(hullX + 22 + i * 29, hullY + hullH - 14, 2.6, 0, Math.PI * 2);
+    g.fill();
+  }
+
+  // --- the reactor eye ----------------------------------------------------
+  const eyeY = hullY + 62;
+  glow(g, x + 6, eyeY, 74 + pulse * 16, accent, 0.42 * pulse);
+  g.fillStyle = '#05070e';
+  g.beginPath();
+  g.arc(x + 6, eyeY, 40, 0, Math.PI * 2);
+  g.fill();
+  // Iris blades, turning slowly — the machine is running.
+  g.save();
+  g.translate(x + 6, eyeY);
+  g.rotate(t * 0.5);
+  g.strokeStyle = rgba(accent, 0.55);
+  g.lineWidth = 5;
+  for (let i = 0; i < 10; i++) {
+    g.rotate((Math.PI * 2) / 10);
+    g.beginPath();
+    g.moveTo(30, 0);
+    g.lineTo(38, 0);
+    g.stroke();
+  }
+  g.restore();
   g.strokeStyle = rgba(accent, 0.9);
   g.lineWidth = 4;
   g.beginPath();
-  g.arc(x + 6, eyeY, 36, 0, Math.PI * 2);
+  g.arc(x + 6, eyeY, 38, 0, Math.PI * 2);
   g.stroke();
   g.fillStyle = accent;
   g.beginPath();
-  g.arc(x + 6, eyeY, 15 + pulse * 4, 0, Math.PI * 2);
+  g.arc(x + 6, eyeY, 14 + pulse * 4, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = rgba('#ffffff', 0.8);
+  g.beginPath();
+  g.arc(x + 1, eyeY - 5, 4.5, 0, Math.PI * 2);
   g.fill();
 
-  // Pistons
-  for (let i = 0; i < 2; i++) {
-    const px = x - 60 + i * 138;
-    const lift = Math.sin(t * 2.2 + i * Math.PI) * 5;
-    g.fillStyle = '#26314f';
-    g.fillRect(px - 7, baseY - 46 + lift, 14, 36 - lift);
-    g.fillStyle = C.steel;
-    g.fillRect(px - 11, baseY - 52 + lift, 22, 10);
+  // --- vents on the flanks, breathing with the pulse ----------------------
+  for (let i = 0; i < 3; i++) {
+    const vy = eyeY + 26 + i * 9;
+    g.fillStyle = rgba('#05070e', 0.6);
+    g.fillRect(hullX + 16, vy, 26, 4);
+    g.fillRect(hullX + hullW - 42, vy, 26, 4);
+    g.fillStyle = rgba(accent, 0.1 + pulse * 0.12);
+    g.fillRect(hullX + 18, vy + 1, 22, 2);
+    g.fillRect(hullX + hullW - 40, vy + 1, 22, 2);
   }
 
-  // Health readout, attached to the machine so the eye never has to hunt.
+  // --- pistons pumping on either side -------------------------------------
+  for (let i = 0; i < 2; i++) {
+    const px = x - 62 + i * 140;
+    const lift = Math.sin(t * 2.2 + i * Math.PI) * 5;
+    g.fillStyle = '#0b1220';
+    g.fillRect(px - 9, baseY - 50 + lift, 18, 42 - lift);
+    g.fillStyle = C.steel;
+    g.fillRect(px - 13, baseY - 58 + lift, 26, 11);
+    g.fillStyle = rgba('#ffffff', 0.25);
+    g.fillRect(px - 13, baseY - 58 + lift, 26, 2);
+  }
+
+  // --- exhaust stack tying the machine into the wall pipework --------------
+  g.fillStyle = '#0b1220';
+  rr(g, hullX + hullW - 46, hullY - 34, 24, 40, 4);
+  g.fill();
+  g.fillStyle = rgba(C.steel, 0.35);
+  g.fillRect(hullX + hullW - 46, hullY - 34, 24, 6);
+  const puff = (t * 0.5) % 1;
+  g.globalAlpha = (1 - puff) * 0.22;
+  g.fillStyle = C.steel;
+  g.beginPath();
+  g.arc(hullX + hullW - 34, hullY - 40 - puff * 46, 6 + puff * 14, 0, Math.PI * 2);
+  g.fill();
+  g.globalAlpha = 1;
+
+  // --- health readout, bolted to the machine -------------------------------
   const barW = 176;
   const barX = x - 78;
-  const barY = baseY - 196;
+  // Clear of the exhaust stack above the hull, which would otherwise cross it.
+  const barY = baseY - 222;
   g.fillStyle = rgba('#000000', 0.62);
   rr(g, barX, barY, barW, 22, 11);
   g.fill();
@@ -246,7 +545,7 @@ function core(g: Ctx, battle: Battle, t: number): void {
   });
   if (danger) {
     const warn = 0.6 + Math.sin(t * 7) * 0.4;
-    label(g, '⚠ LÕI NGUY HIỂM', x, barY - 12, {
+    label(g, `⚠ ${tr('coreDanger')}`, x, barY - 12, {
       align: 'center',
       size: 11,
       color: rgba(C.bad, warn),
@@ -256,22 +555,55 @@ function core(g: Ctx, battle: Battle, t: number): void {
   }
 }
 
-/** The letter an enemy carries, floating above its head. */
+/**
+ * The letter an enemy carries, floating above its head.
+ *
+ * An announced letter is a bright tile with a gold ring: the player can plan
+ * around it. An unannounced carrier shows a sealed tile-face instead — solid and
+ * clearly occupied, so it does not read as an empty placeholder, but with no
+ * letter revealed.
+ */
 function carrierBadge(g: Ctx, enemy: Enemy, t: number): void {
   if (!enemy.carry) return;
   const lane = clamp(enemy.lane, 0, FIELD.lanes - 1);
   const scale = laneScale(lane);
   const size = 30 * scale;
   const bob = Math.sin(t * 3 + enemy.wobble) * 2;
-  const y = enemyTop(enemy) - size - 10 + bob;
+  const y = enemyTop(enemy) - size - 12 + bob;
   const x = enemy.x - size / 2;
-  // Undisclosed letters are shown face-down, so the preview stays honest.
-  tile(g, x, y, size, enemy.announced ? enemy.carry : '?', enemy.announced ? 'filled' : 'slot');
-  const pulse = 0.5 + Math.sin(t * 4 + enemy.wobble) * 0.5;
-  g.strokeStyle = rgba(enemy.announced ? C.gold : C.faint, 0.2 + pulse * 0.3);
-  g.lineWidth = 2;
-  rr(g, x - 3, y - 3, size + 6, size + 6, 9);
-  g.stroke();
+
+  if (enemy.announced) {
+    const pulse = 0.5 + Math.sin(t * 4 + enemy.wobble) * 0.5;
+    glow(g, x + size / 2, y + size / 2, size * 1.2, C.gold, 0.16 + pulse * 0.1);
+    tile(g, x, y, size, enemy.carry, 'filled', { glow: C.gold });
+    g.strokeStyle = rgba(C.gold, 0.35 + pulse * 0.3);
+    g.lineWidth = 2;
+    rr(g, x - 3, y - 3, size + 6, size + 6, 9);
+    g.stroke();
+  } else {
+    // Sealed stock: a dark tile with a stamped mark and a strapped edge.
+    const grad = g.createLinearGradient(x, y, x, y + size);
+    grad.addColorStop(0, '#232c46');
+    grad.addColorStop(1, '#161d31');
+    g.fillStyle = rgba('#000000', 0.4);
+    rr(g, x, y + 3, size, size, 8);
+    g.fill();
+    g.fillStyle = grad;
+    rr(g, x, y, size, size, 8);
+    g.fill();
+    g.strokeStyle = rgba(C.slotEdge, 0.9);
+    g.lineWidth = 2;
+    rr(g, x, y, size, size, 8);
+    g.stroke();
+    // Stamped question mark, sunk into the face.
+    g.fillStyle = rgba(C.faint, 0.85);
+    g.font = `800 ${size * 0.5}px ${F.ui}`;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText('?', x + size / 2, y + size / 2 + size * 0.03);
+    g.fillStyle = rgba(C.gold, 0.22);
+    g.fillRect(x + size * 0.12, y + size * 0.5, size * 0.76, size * 0.06);
+  }
 }
 
 /** Foot position of an enemy (ground contact point). */
@@ -303,111 +635,378 @@ function enemyTop(enemy: Enemy): number {
 function drawEnemy(g: Ctx, enemy: Enemy, t: number): void {
   const lane = clamp(enemy.lane, 0, FIELD.lanes - 1);
   const scale = laneScale(lane);
-  const s = enemy.size * scale;
+  const s = enemy.size * scale * UNIT;
   const def = ENEMIES[enemy.kind];
   const flash = enemy.hitFlash;
 
-  if (!enemy.flying) contact(g, enemy.x, lane, s, 0.34);
+  if (!enemy.flying) contact(g, enemy.x, lane, s, 0.42);
 
   g.save();
   g.translate(enemy.x, enemyFoot(enemy));
   g.scale(scale, scale);
 
-  const body = flash > 0.4 ? '#ffffff' : def.color;
-  g.fillStyle = body;
-  g.strokeStyle = rgba('#050810', 0.9);
-  g.lineWidth = 2 / scale;
+  /** Vertical body gradient: lit from above, falling into its own shadow. */
+  const shell = (color: string, top: number, bottom: number): string | CanvasGradient => {
+    if (flash > 0.4) return '#ffffff';
+    const grad = g.createLinearGradient(0, top, 0, bottom);
+    grad.addColorStop(0, mix(color, '#ffffff', 0.34));
+    grad.addColorStop(0.5, color);
+    grad.addColorStop(1, mix(color, '#05070e', 0.55));
+    return grad;
+  };
+
+  /** A glowing lens, with the dark socket around it that makes it read as an eye. */
+  const eye = (x: number, y: number, r: number, color: string, phase = 0): void => {
+    const pulse = 0.68 + Math.sin(t * 3.4 + phase) * 0.32;
+    glow(g, x, y, r * 5, color, 0.42 * pulse);
+    g.fillStyle = '#05070e';
+    g.beginPath();
+    g.arc(x, y, r * 1.62, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = color;
+    g.beginPath();
+    g.arc(x, y, r, 0, Math.PI * 2);
+    g.fill();
+  };
+
+  /** Legs. `pair` counts limbs on the visible side; they stride as it walks. */
+  const legs = (count: number, top: number, reach: number, spread: number, color = '#080d18'): void => {
+    g.strokeStyle = color;
+    g.lineWidth = Math.max(1.8, s * 0.1);
+    g.lineCap = 'round';
+    for (let i = 0; i < count; i++) {
+      const px = -spread / 2 + (i / Math.max(1, count - 1)) * spread;
+      const phase = enemy.wobble * 7 + i * 2.2;
+      const swing = Math.sin(phase) * reach * 0.5;
+      const lift = Math.max(0, Math.sin(phase)) * reach * 0.22;
+      g.beginPath();
+      g.moveTo(px, top);
+      g.lineTo(px + swing * 0.6 - reach * 0.12, top + (0 - top) * 0.55 - lift);
+      g.lineTo(px + swing, -lift * 0.4);
+      g.stroke();
+    }
+  };
 
   switch (def.shape) {
+    // ---- MOTE: a beetle-like crawler. Small, but it visibly has legs, a
+    // carapace and one wide lens, so it never reads as a UI pill.
     case 'mote': {
-      // Chunky rounded body with a bright visor: reads at a glance at any size.
-      const grad = g.createLinearGradient(0, -s * 1.4, 0, 0);
-      grad.addColorStop(0, mix(def.color, '#ffffff', 0.22));
-      grad.addColorStop(1, def.color);
-      g.fillStyle = flash > 0.4 ? '#ffffff' : grad;
-      rr(g, -s * 0.82, -s * 1.32, s * 1.64, s * 1.32, s * 0.34);
+      legs(3, -s * 0.44, s * 0.46, s * 1.06, '#070b14');
+      // Antennae
+      g.strokeStyle = '#070b14';
+      g.lineWidth = Math.max(1.2, s * 0.06);
+      for (const a of [-0.5, 0.4]) {
+        g.beginPath();
+        g.moveTo(-s * 0.62, -s * 0.92);
+        g.quadraticCurveTo(-s * (1.1 + a * 0.2), -s * (1.5 + a * 0.25), -s * (1.24 + a * 0.3), -s * (1.66 + a * 0.3));
+        g.stroke();
+      }
+      // Carapace: domed shell with a spine seam.
+      g.beginPath();
+      g.moveTo(-s * 0.92, -s * 0.3);
+      g.quadraticCurveTo(-s * 1.0, -s * 1.32, 0, -s * 1.4);
+      g.quadraticCurveTo(s * 0.98, -s * 1.32, s * 0.9, -s * 0.3);
+      g.closePath();
+      g.fillStyle = shell(def.color, -s * 1.4, -s * 0.2);
       g.fill();
       g.strokeStyle = rgba('#050810', 0.95);
       g.lineWidth = 2 / scale;
-      rr(g, -s * 0.82, -s * 1.32, s * 1.64, s * 1.32, s * 0.34);
       g.stroke();
-      g.fillStyle = '#080d18';
-      rr(g, -s * 0.6, -s * 1.02, s * 1.2, s * 0.44, s * 0.16);
-      g.fill();
-      g.fillStyle = C.cyan;
+      // Spine seam + segment lines: reads as a shell, not a capsule.
+      g.strokeStyle = rgba('#050810', 0.35);
+      g.lineWidth = Math.max(1, s * 0.05);
       g.beginPath();
-      g.arc(-s * 0.28, -s * 0.8, s * 0.13, 0, Math.PI * 2);
-      g.arc(s * 0.28, -s * 0.8, s * 0.13, 0, Math.PI * 2);
+      g.moveTo(0, -s * 1.38);
+      g.lineTo(0, -s * 0.34);
+      for (let i = 0; i < 3; i++) {
+        const yy = -s * (0.55 + i * 0.28);
+        g.moveTo(-s * 0.86, yy);
+        g.quadraticCurveTo(0, yy - s * 0.1, s * 0.84, yy);
+      }
+      g.stroke();
+      // Rim light along the top of the shell.
+      g.strokeStyle = rgba('#ffffff', 0.3);
+      g.lineWidth = Math.max(1.4, s * 0.07);
+      g.beginPath();
+      g.moveTo(-s * 0.86, -s * 0.72);
+      g.quadraticCurveTo(-s * 0.8, -s * 1.26, 0, -s * 1.34);
+      g.stroke();
+      // Single wide lens, at the front (it walks toward the core, to the left).
+      g.fillStyle = '#05070e';
+      rr(g, -s * 1.02, -s * 0.95, s * 0.72, s * 0.42, s * 0.16);
       g.fill();
+      eye(-s * 0.72, -s * 0.74, s * 0.14, C.cyan, enemy.wobble);
+      // Mandibles.
+      g.strokeStyle = rgba('#050810', 0.9);
+      g.lineWidth = Math.max(1.4, s * 0.08);
+      g.beginPath();
+      g.moveTo(-s * 0.9, -s * 0.4);
+      g.lineTo(-s * 1.16, -s * 0.18);
+      g.moveTo(-s * 0.9, -s * 0.28);
+      g.lineTo(-s * 1.14, -s * 0.06);
+      g.stroke();
       break;
     }
+    // ---- RUNNER: a lean two-legged strider, leaning into its sprint.
     case 'runner': {
-      // Legs
+      const stride = Math.sin(enemy.wobble * 9) * s * 0.5;
+      g.strokeStyle = '#080d18';
+      g.lineWidth = Math.max(2, s * 0.12);
+      g.lineCap = 'round';
+      for (const [off, alpha] of [[0, 1], [-s * 0.3, 0.5]] as Array<[number, number]>) {
+        g.globalAlpha = alpha;
+        g.beginPath();
+        g.moveTo(s * 0.1 + off, -s * 0.7);
+        g.lineTo(s * 0.1 + off - stride, -s * 0.34);
+        g.lineTo(s * 0.1 + off - stride * 1.4, 0);
+        g.stroke();
+        g.beginPath();
+        g.moveTo(s * 0.3 + off, -s * 0.7);
+        g.lineTo(s * 0.3 + off + stride, -s * 0.34);
+        g.lineTo(s * 0.3 + off + stride * 1.3, 0);
+        g.stroke();
+      }
+      g.globalAlpha = 1;
+      // Torso: a wedge, low at the front, high at the hip.
+      g.beginPath();
+      g.moveTo(-s * 0.95, -s * 0.82);
+      g.lineTo(-s * 0.2, -s * 1.16);
+      g.lineTo(s * 0.62, -s * 1.06);
+      g.lineTo(s * 0.5, -s * 0.6);
+      g.lineTo(-s * 0.6, -s * 0.56);
+      g.closePath();
+      g.fillStyle = shell(def.color, -s * 1.16, -s * 0.56);
+      g.fill();
       g.strokeStyle = rgba('#050810', 0.95);
-      g.lineWidth = 3 / scale;
-      const stride = Math.sin(enemy.wobble * 3) * s * 0.35;
-      g.beginPath();
-      g.moveTo(-s * 0.2, -s * 0.4);
-      g.lineTo(-s * 0.2 - stride, 0);
-      g.moveTo(s * 0.2, -s * 0.4);
-      g.lineTo(s * 0.2 + stride, 0);
+      g.lineWidth = 2 / scale;
       g.stroke();
-      // Body leaning forward
-      g.fillStyle = body;
+      // Neck + head, thrust forward.
       g.beginPath();
-      g.moveTo(-s * 0.9, -s * 0.5);
-      g.lineTo(s * 0.8, -s * 1.25);
-      g.lineTo(s * 0.5, -s * 0.55);
-      g.lineTo(s * 0.8, -s * 0.1);
+      g.moveTo(-s * 0.86, -s * 0.84);
+      g.lineTo(-s * 1.3, -s * 0.9);
+      g.lineTo(-s * 1.28, -s * 1.06);
+      g.lineTo(-s * 0.8, -s * 1.08);
       g.closePath();
+      g.fillStyle = shell(def.color, -s * 1.1, -s * 0.85);
       g.fill();
       g.stroke();
+      // Rim light along the spine.
+      g.strokeStyle = rgba('#ffffff', 0.32);
+      g.lineWidth = Math.max(1.4, s * 0.07);
+      g.beginPath();
+      g.moveTo(-s * 0.2, -s * 1.12);
+      g.lineTo(s * 0.6, -s * 1.02);
+      g.stroke();
+      eye(-s * 1.12, -s * 0.98, s * 0.11, C.gold, enemy.wobble + 1);
+      // Speed streaks behind it.
+      if (enemy.speed > 0) {
+        g.strokeStyle = rgba(def.color, 0.28);
+        g.lineWidth = Math.max(1, s * 0.05);
+        for (let i = 0; i < 3; i++) {
+          const yy = -s * (0.6 + i * 0.22);
+          const len = s * (0.9 - i * 0.16);
+          g.beginPath();
+          g.moveTo(s * 0.7, yy);
+          g.lineTo(s * 0.7 + len, yy);
+          g.stroke();
+        }
+      }
       break;
     }
+    // ---- FLYER: a hovering carrier with a rotating blade ring and a hanging
+    // grip, so it reads as airborne even without a shadow to sell it.
     case 'flyer': {
-      const flap = Math.sin(t * 14 + enemy.wobble) * 0.5;
-      g.fillStyle = rgba(def.color, 0.5);
+      const flap = Math.sin(t * 13 + enemy.wobble);
+      // Rotor blur discs.
+      for (const [dx, alpha] of [[-s * 0.9, 0.4], [s * 0.9, 0.4]] as Array<[number, number]>) {
+        g.save();
+        g.globalAlpha = alpha * (0.6 + Math.abs(flap) * 0.4);
+        g.strokeStyle = rgba(def.color, 0.85);
+        g.lineWidth = Math.max(1.6, s * 0.09);
+        g.beginPath();
+        g.ellipse(dx, -s * 1.05, s * 0.62, s * 0.16, 0, 0, Math.PI * 2);
+        g.stroke();
+        g.restore();
+      }
+      // Rotor arms.
+      g.strokeStyle = '#080d18';
+      g.lineWidth = Math.max(1.6, s * 0.09);
       g.beginPath();
-      g.ellipse(-s * 0.25, -s * 0.7, s * 1.2, s * 0.4, flap, 0, Math.PI * 2);
+      g.moveTo(-s * 0.86, -s * 1.02);
+      g.lineTo(-s * 0.3, -s * 0.86);
+      g.moveTo(s * 0.86, -s * 1.02);
+      g.lineTo(s * 0.3, -s * 0.86);
+      g.stroke();
+      // Hull.
+      g.beginPath();
+      g.ellipse(0, -s * 0.78, s * 0.66, s * 0.42, 0, 0, Math.PI * 2);
+      g.fillStyle = shell(def.color, -s * 1.2, -s * 0.36);
       g.fill();
+      g.strokeStyle = rgba('#050810', 0.95);
+      g.lineWidth = 2 / scale;
+      g.stroke();
+      g.strokeStyle = rgba('#ffffff', 0.3);
+      g.lineWidth = Math.max(1.3, s * 0.06);
       g.beginPath();
-      g.ellipse(s * 0.25, -s * 0.7, s * 1.2, s * 0.4, -flap, 0, Math.PI * 2);
+      g.ellipse(0, -s * 0.78, s * 0.6, s * 0.34, 0, Math.PI * 1.05, Math.PI * 1.95);
+      g.stroke();
+      // Hanging grip: this is the thing that hauls letters over walls.
+      g.strokeStyle = '#080d18';
+      g.lineWidth = Math.max(1.6, s * 0.09);
+      g.beginPath();
+      g.moveTo(-s * 0.3, -s * 0.42);
+      g.lineTo(-s * 0.34, -s * 0.02);
+      g.lineTo(s * 0.34, -s * 0.02);
+      g.lineTo(s * 0.3, -s * 0.42);
+      g.stroke();
+      g.fillStyle = rgba(def.color, 0.35);
+      g.fillRect(-s * 0.34, -s * 0.06, s * 0.68, s * 0.08);
+      eye(-s * 0.3, -s * 0.82, s * 0.1, C.violet, enemy.wobble + 2);
+      eye(s * 0.3, -s * 0.82, s * 0.1, C.violet, enemy.wobble + 3.4);
+      break;
+    }
+    // ---- BRUTE: a tracked battering hulk. Weight comes from the treads, the
+    // overhanging armour brow and the exhaust stacks.
+    case 'brute': {
+      // Treads.
+      g.fillStyle = '#080d18';
+      rr(g, -s * 1.0, -s * 0.46, s * 2.0, s * 0.46, s * 0.16);
       g.fill();
-      g.fillStyle = body;
+      g.fillStyle = rgba(C.steel, 0.5);
+      const roll = (t * 40) % 18;
+      for (let i = 0; i < 9; i++) {
+        g.beginPath();
+        g.arc(-s * 0.9 + i * s * 0.225 + roll * 0, -s * 0.23, s * 0.07, 0, Math.PI * 2);
+        g.fill();
+      }
+      // Idler wheels.
+      g.fillStyle = '#131b2e';
+      for (const wx of [-s * 0.66, 0, s * 0.66]) {
+        g.beginPath();
+        g.arc(wx, -s * 0.23, s * 0.17, 0, Math.PI * 2);
+        g.fill();
+      }
+      // Hull.
+      plate(g, -s * 0.94, -s * 1.86, s * 1.88, s * 1.46, {
+        radius: s * 0.14,
+        fill: '#7d2a24',
+        edge: '#3a1509',
+        depth: s * 0.12,
+      });
+      g.fillStyle = flash > 0.4 ? '#ffffff' : shell(def.color, -s * 1.86, -s * 0.5);
+      rr(g, -s * 0.9, -s * 1.82, s * 1.8, s * 1.38, s * 0.14);
+      g.fill();
+      // Armour brow overhanging the face.
+      g.fillStyle = mix(def.color, '#000000', 0.34);
       g.beginPath();
-      g.moveTo(0, -s * 1.5);
-      g.lineTo(s * 0.72, -s * 0.7);
-      g.lineTo(0, 0);
-      g.lineTo(-s * 0.72, -s * 0.7);
+      g.moveTo(-s * 1.06, -s * 1.5);
+      g.lineTo(-s * 0.34, -s * 1.78);
+      g.lineTo(-s * 0.34, -s * 1.44);
+      g.lineTo(-s * 1.06, -s * 1.28);
       g.closePath();
       g.fill();
+      g.strokeStyle = rgba('#050810', 0.9);
+      g.lineWidth = 2 / scale;
       g.stroke();
-      break;
-    }
-    case 'brute': {
-      plate(g, -s, -s * 2.1, s * 2, s * 2.1, { radius: 8, fill: body, edge: '#7d2a24', depth: 5 });
-      g.fillStyle = rgba('#050810', 0.85);
-      g.fillRect(-s * 0.72, -s * 1.5, s * 1.44, s * 0.3);
-      g.fillStyle = rgba('#ffffff', 0.16);
-      for (let i = 0; i < 3; i++) g.fillRect(-s * 0.66 + i * s * 0.55, -s * 0.85, s * 0.34, s * 0.2);
-      // treads
-      g.fillStyle = '#0d1220';
-      g.fillRect(-s * 0.9, -s * 0.25, s * 1.8, s * 0.25);
-      break;
-    }
-    case 'boss': {
-      glow(g, 0, -s, s * 2.4, C.ember, 0.32);
-      plate(g, -s, -s * 2.5, s * 2, s * 2.5, { radius: 14, fill: body, edge: '#7a2f18', depth: 8 });
-      g.fillStyle = '#050810';
+      // Vent slits on the flank.
+      for (let i = 0; i < 3; i++) {
+        g.fillStyle = rgba('#050810', 0.72);
+        g.fillRect(s * 0.08 + i * s * 0.24, -s * 1.0, s * 0.14, s * 0.4);
+      }
+      // Rim light along the hull top.
+      g.strokeStyle = rgba('#ffffff', 0.22);
+      g.lineWidth = Math.max(1.6, s * 0.06);
       g.beginPath();
-      g.arc(0, -s * 1.5, s * 0.52, 0, Math.PI * 2);
+      g.moveTo(-s * 0.86, -s * 1.78);
+      g.lineTo(s * 0.84, -s * 1.78);
+      g.stroke();
+      // Exhaust stacks, puffing on a slow cycle.
+      for (const ex of [-s * 0.5, -s * 0.16]) {
+        g.fillStyle = '#0d1322';
+        rr(g, ex, -s * 2.06, s * 0.22, s * 0.34, s * 0.06);
+        g.fill();
+        const puff = ((t * 0.7 + ex / s) % 1);
+        g.globalAlpha = (1 - puff) * 0.3;
+        g.fillStyle = C.steel;
+        g.beginPath();
+        g.arc(ex + s * 0.11, -s * 2.1 - puff * s * 0.5, s * (0.12 + puff * 0.2), 0, Math.PI * 2);
+        g.fill();
+        g.globalAlpha = 1;
+      }
+      // Headlamps.
+      eye(-s * 0.78, -s * 1.16, s * 0.1, C.ember, enemy.wobble + 0.6);
+      eye(-s * 0.5, -s * 1.16, s * 0.1, C.ember, enemy.wobble + 1.8);
+      break;
+    }
+    // ---- BOSS: the machine the whole line feeds. Big core, hazard plating,
+    // and a slowly opening iris that telegraphs its mood.
+    case 'boss': {
+      glow(g, 0, -s * 1.1, s * 2.6, C.ember, 0.3);
+      // Base skirt.
+      g.fillStyle = '#080d18';
+      rr(g, -s * 1.06, -s * 0.42, s * 2.12, s * 0.42, s * 0.12);
       g.fill();
+      // Main housing.
+      plate(g, -s * 1.0, -s * 2.42, s * 2.0, s * 2.0, {
+        radius: s * 0.18,
+        fill: '#7a2f18',
+        edge: '#3a1509',
+        depth: s * 0.2,
+      });
+      const housing = shell(def.color, -s * 2.4, -s * 0.5);
+      g.fillStyle = flash > 0.4 ? '#ffffff' : housing;
+      rr(g, -s * 0.96, -s * 2.38, s * 1.92, s * 1.96, s * 0.18);
+      g.fill();
+      g.strokeStyle = rgba('#050810', 0.9);
+      g.lineWidth = 2 / scale;
+      rr(g, -s * 0.96, -s * 2.38, s * 1.92, s * 1.96, s * 0.18);
+      g.stroke();
+      // Hazard chevrons on the shoulder plates.
+      g.save();
+      rr(g, -s * 0.96, -s * 2.38, s * 1.92, s * 1.96, s * 0.18);
+      g.clip();
+      hazardStripes(g, -s * 1.0, -s * 0.92, s * 2.0, s * 0.3, '#f0b445');
+      g.restore();
+      // Iris: a ring of blades around a molten centre.
+      const irisY = -s * 1.62;
+      g.fillStyle = '#05070e';
+      g.beginPath();
+      g.arc(0, irisY, s * 0.56, 0, Math.PI * 2);
+      g.fill();
+      glow(g, 0, irisY, s * 1.1, C.gold, 0.34);
       g.fillStyle = C.gold;
       g.beginPath();
-      g.arc(0, -s * 1.5, s * 0.24 + Math.sin(t * 6) * 2, 0, Math.PI * 2);
+      g.arc(0, irisY, s * 0.26 + Math.sin(t * 6) * s * 0.03, 0, Math.PI * 2);
       g.fill();
-      g.fillStyle = rgba('#050810', 0.85);
-      for (let i = -1; i <= 1; i++) g.fillRect(i * s * 0.45 - s * 0.11, -s * 0.5, s * 0.22, s * 0.5);
+      g.save();
+      g.translate(0, irisY);
+      g.rotate(t * 0.7);
+      g.strokeStyle = rgba('#050810', 0.85);
+      g.lineWidth = Math.max(2, s * 0.07);
+      for (let i = 0; i < 8; i++) {
+        g.rotate((Math.PI * 2) / 8);
+        g.beginPath();
+        g.moveTo(s * 0.3, 0);
+        g.lineTo(s * 0.54, 0);
+        g.stroke();
+      }
+      g.restore();
+      // Rim light.
+      g.strokeStyle = rgba('#ffffff', 0.2);
+      g.lineWidth = Math.max(1.8, s * 0.05);
+      g.beginPath();
+      g.moveTo(-s * 0.9, -s * 2.32);
+      g.lineTo(s * 0.9, -s * 2.32);
+      g.stroke();
+      // Piston legs.
+      for (let i = -1; i <= 1; i++) {
+        const px = i * s * 0.56;
+        const lift = Math.sin(t * 2.4 + i * 1.4) * s * 0.06;
+        g.fillStyle = '#131b2e';
+        g.fillRect(px - s * 0.1, -s * 0.52 + lift, s * 0.2, s * 0.44 - lift);
+        g.fillStyle = C.steel;
+        g.fillRect(px - s * 0.15, -s * 0.6 + lift, s * 0.3, s * 0.12);
+      }
       break;
     }
     default:
@@ -415,40 +1014,46 @@ function drawEnemy(g: Ctx, enemy: Enemy, t: number): void {
   }
 
   if (enemy.freezeT > 0) {
-    g.fillStyle = rgba('#8fe3f0', 0.4);
-    g.beginPath();
-    g.arc(0, -s * 0.7, s * 1.2, 0, Math.PI * 2);
+    // Encased in ice: a cracked pane over the whole silhouette.
+    g.fillStyle = rgba('#8fe3f0', 0.3);
+    rr(g, -s * 1.1, -s * 2.2, s * 2.2, s * 2.2, s * 0.3);
     g.fill();
-    g.strokeStyle = rgba('#ffffff', 0.65);
+    g.strokeStyle = rgba('#ffffff', 0.6);
     g.lineWidth = 2 / scale;
-    for (let i = 0; i < 3; i++) {
-      const a = (i / 3) * Math.PI * 2 + 0.4;
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2 + 0.4;
       g.beginPath();
-      g.moveTo(Math.cos(a) * s * 0.3, -s * 0.7 + Math.sin(a) * s * 0.3);
-      g.lineTo(Math.cos(a) * s * 1.1, -s * 0.7 + Math.sin(a) * s * 1.1);
+      g.moveTo(0, -s * 1.1);
+      g.lineTo(Math.cos(a) * s * 1.0, -s * 1.1 + Math.sin(a) * s * 1.0);
       g.stroke();
     }
+    rr(g, -s * 1.1, -s * 2.2, s * 2.2, s * 2.2, s * 0.3);
+    g.strokeStyle = rgba('#d8f6ff', 0.75);
+    g.lineWidth = 2.4 / scale;
+    g.stroke();
   } else if (enemy.burnT > 0) {
-    for (let i = 0; i < 3; i++) {
-      const fx = -7 + i * 7;
-      const h = 14 + Math.sin(t * 18 + i * 2 + enemy.wobble) * 6;
-      g.fillStyle = rgba(i % 2 === 0 ? '#f2734a' : '#f0b445', 0.85);
+    const top = enemyTop(enemy) - enemyFoot(enemy);
+    for (let i = 0; i < 4; i++) {
+      const fx = -s * 0.6 + i * s * 0.4;
+      const h = s * (0.5 + Math.abs(Math.sin(t * 9 + i * 2 + enemy.wobble)) * 0.5);
+      g.fillStyle = rgba(i % 2 === 0 ? C.ember : C.gold, 0.8);
       g.beginPath();
-      g.moveTo(fx, -s * 1.4);
-      g.lineTo(fx + 4, -s * 1.4 - h);
-      g.lineTo(fx + 9, -s * 1.4);
+      g.moveTo(fx - s * 0.14, top);
+      g.quadraticCurveTo(fx, top - h * 0.7, fx + s * 0.02, top - h);
+      g.quadraticCurveTo(fx + s * 0.12, top - h * 0.6, fx + s * 0.16, top);
       g.closePath();
       g.fill();
     }
+    glow(g, 0, top, s * 1.6, C.ember, 0.2);
   }
   g.restore();
 
   if (enemy.hp < enemy.maxHp) {
-    const w = Math.max(30, s * 2.1);
+    const w = Math.max(34, s * 2.1);
     const hx = enemy.x - w / 2;
-    const hy = enemyTop(enemy) - (enemy.carry ? 42 : 12);
-    g.fillStyle = rgba('#05070e', 0.7);
-    rr(g, hx, hy, w, 6, 3);
+    const hy = enemyTop(enemy) - (enemy.carry ? 44 : 14);
+    g.fillStyle = rgba('#05070e', 0.72);
+    rr(g, hx - 1, hy - 1, w + 2, 8, 4);
     g.fill();
     g.fillStyle = def.tags.includes('HEAVY') ? C.ember : C.mint;
     rr(g, hx, hy, Math.max(2, w * (enemy.hp / enemy.maxHp)), 6, 3);
@@ -459,7 +1064,7 @@ function drawEnemy(g: Ctx, enemy: Enemy, t: number): void {
 
 function drawEntity(g: Ctx, ent: Entity, t: number): void {
   const lane = clamp(Math.round(ent.lane), 0, FIELD.lanes - 1);
-  const scale = laneScale(lane) * (0.45 + 0.55 * ent.spawn);
+  const scale = laneScale(lane) * (0.45 + 0.55 * ent.spawn) * UNIT;
   const color = BP_COLOR[ent.kind] ?? C.cyan;
   const isZone = ent.kind === 'OIL' || ent.kind === 'WEB' || ent.kind === 'ICE';
 
@@ -787,6 +1392,7 @@ export function drawArena(g: Ctx, battle: Battle, t: number, opts: ArenaOptions)
     g.setLineDash([]);
   }
   g.restore();
+  focus(g);
 }
 
 /** Arena-space marker used by tutorial spotlights. */

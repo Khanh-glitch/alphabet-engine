@@ -23,6 +23,8 @@ export interface Settings {
   textScale: number;
   speed: 1 | 2 | 3;
   trace: boolean;
+  /** Set once the player has read the how-to-play panel. */
+  seenHowto: boolean;
 }
 
 export const defaultSettings = (): Settings => ({
@@ -36,6 +38,7 @@ export const defaultSettings = (): Settings => ({
   textScale: 1,
   speed: 1,
   trace: false,
+  seenHowto: false,
 });
 
 export interface CodexState {

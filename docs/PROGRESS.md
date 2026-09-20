@@ -29,6 +29,10 @@ It did not match this brief. The gaps that mattered:
 
 ## Working
 
+- **Onboarding**: a four-step "how to play" panel, auto-shown before the first
+  decision and reachable from the title screen and the battle `?` button, plus
+  teaching hints that spotlight the panel they describe.
+
 - Deterministic domain layer: seeded streams, `LetterBag`, `LetterPool`,
   recipe resolver, wildcard substitution, machine-rule hooks, trace log.
 - Battle simulation: spawn director, bag feed, craft beats, object behaviours
@@ -72,7 +76,7 @@ remembering:
 
 1. Playtest pacing by hand (the harness cannot judge feel): confirm the first
    craft lands before the player gets bored and that the wildcard decision is
-   tense.
+   tense. **Blocked on player feedback — the build is live for exactly this.**
 2. Give the four thin blueprints (MINE, SAW, WEB, ICE) authored homes: encounters
    whose guaranteed letters point at them.
 3. Replace the flat boss escort timer with phases that change the *shape* of the

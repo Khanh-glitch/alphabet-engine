@@ -108,8 +108,19 @@ export class Battle {
     marksPlaced: 0,
     markedKills: 0,
     lettersFromMarked: 0,
-    /** Seconds where nothing was happening and the player had no input. */
+    /**
+     * Seconds of active fight time with nothing on the field, nothing crafting
+     * and nothing in flight — the player is watching an empty screen.
+     *
+     * The brief's test I is about dead watch time, and it warns against
+     * "60-second stretches where the player only watches a solved engine". This
+     * measures the narrow, unambiguous half of that: there is literally nothing to
+     * look at. The harder half — enemies alive but the player has no decision —
+     * is not captured here, and should not be read as covered.
+     */
     deadWatch: 0,
+    /** Seconds a craft beat was playing, i.e. the machine briefly owned the screen. */
+    beatSeconds: 0,
   };
   private randomLetterRng: Rng;
   private cleanupCd = 0;
@@ -557,6 +568,17 @@ export class Battle {
       if (this.introT <= 0) this.state = 'fight';
       this.stepCrafts(dt);
       return;
+    }
+
+    // Dead-watch accounting runs before the steps, on the state the player was
+    // actually looking at for this frame.
+    if (this.state === 'fight') {
+      const nothingToWatch =
+        !this.enemies.some((e) => !e.dead) &&
+        this.pending.length === 0 &&
+        this.craftCount === 0;
+      if (nothingToWatch) this.v2.deadWatch += dt;
+      if (this.pending.length > 0) this.v2.beatSeconds += dt;
     }
 
     this.stepSpawner();

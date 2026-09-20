@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit",
     "shot": "node tools/shoot.mjs shot",
     "sim": "node tools/shoot.mjs sim",
-    "test": "node tools/test.mjs"
+    "test": "node tools/test.mjs",
+    "bots": "node tools/bots.mjs"
   },
   "repository": {
     "type": "git",

@@ -243,6 +243,9 @@ async function main(): Promise<void> {
       lettersFromMarked: 0,
       wildcards: 0,
       reserveOverflow: 0,
+      deadWatch: 0,
+      beats: 0,
+      fightSeconds: 0,
       seconds: [] as number[],
       crafts: [] as number[],
       craftsPerSecond: [] as number[],
@@ -329,6 +332,9 @@ async function main(): Promise<void> {
         agg.fallback += m.fallback;
         agg.focusSwitches += m.focusSwitches;
         agg.reserveOverflow += m.reserveOverflow;
+        agg.deadWatch += v2.deadWatch as number;
+        agg.beats += v2.beatSeconds as number;
+        agg.fightSeconds += e.seconds as number;
         for (const [k, v] of Object.entries(e.byBlueprint as Record<string, number>)) {
           agg.byBlueprint[k] = (agg.byBlueprint[k] ?? 0) + (v as number);
         }
@@ -374,6 +380,12 @@ async function main(): Promise<void> {
         `marks               : placed=${agg.marks} markedKills=${agg.markedKills} lettersFromMarked=${agg.lettersFromMarked}`,
       );
       console.log(`wildcards used      : ${agg.wildcards}   reserve overflow=${agg.reserveOverflow}`);
+      const dpct = (agg.deadWatch / Math.max(0.001, agg.fightSeconds)) * 100;
+      const bpct = (agg.beats / Math.max(0.001, agg.fightSeconds)) * 100;
+      console.log(
+        `dead watch          : ${dpct.toFixed(1)}% of fight time with an empty field ` +
+          `(${agg.deadWatch.toFixed(1)}s); craft beats ${bpct.toFixed(1)}%`,
+      );
       console.log(
         `encounter seconds   : ${stat(agg.seconds.map((v, i) => v / agg.fightsPerRun[i]))}   target 8-15`,
       );

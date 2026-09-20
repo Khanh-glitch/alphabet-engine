@@ -3,7 +3,6 @@ import { C, R, T, VIEW } from '../../core/theme';
 
 import { loc, t } from '../../core/i18n';
 import { sfx } from '../../core/audio';
-import { RUN } from '../../content/encounters';
 import { label, plate, type Ctx } from '../../core/draw';
 import type { Screen } from '../../app/app';
 
@@ -30,7 +29,8 @@ export function createPauseScreen(): Screen {
 
       const run = app.run;
       if (run) {
-        const encounter = RUN[Math.min(run.state.encounterIndex, RUN.length - 1)];
+        const list = run.encounters;
+        const encounter = list[Math.min(run.state.encounterIndex, list.length - 1)];
         label(g, loc(run.kit.name), x + w / 2, y + 96, {
           align: 'center',
           size: T.small,
@@ -39,7 +39,7 @@ export function createPauseScreen(): Screen {
         });
         label(
           g,
-          `${t('wave')} ${run.state.encounterIndex + 1}/${RUN.length} · ${loc(encounter.name)}`,
+          `${t('wave')} ${run.state.encounterIndex + 1}/${list.length} · ${loc(encounter.name)}`,
           x + w / 2,
           y + 120,
           { align: 'center', size: T.small, color: C.faint, weight: 600 },

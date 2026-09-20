@@ -11,7 +11,6 @@ import { loc, t } from '../../core/i18n';
 import { sfx } from '../../core/audio';
 import { store } from '../../core/save';
 import { TUNE } from '../../content/tuning';
-import { RUN } from '../../content/encounters';
 
 
 import { FxLayer } from '../../render/fx';
@@ -252,7 +251,9 @@ export function createBattleScreen(): Screen {
               return;
             }
           }
-          app.goto('spoils');
+          // V2 evaluation set has no reward phase between fights (brief 3.12):
+          // the point is replaying one encounter until the loop itself is good.
+          app.goto(app.run?.mode === 'v2test' && !app.run.finished ? 'battle' : 'spoils');
         }
       }
     },
@@ -310,7 +311,7 @@ export function createBattleScreen(): Screen {
         chainActive: time - battle.lastCraftAt < TUNE.chainWindow,
         chainPulse: Math.max(0, 1 - (time - battle.lastCraftAt) / 1.2),
         waveIndex: (app.run?.state.encounterIndex ?? 0) + 1,
-        waveTotal: RUN.length,
+        waveTotal: app.run?.encounters.length ?? 1,
         hint: hint && hintT > 0 ? hint : null,
         hintEmphasis: hintT > 1,
         hintTarget: hint && hintT > 0 ? hintTarget : null,

@@ -8,7 +8,7 @@
 import { streamFor } from '../core/rng';
 import type { Letter, BlueprintId } from '../alphabet/types';
 import { BLUEPRINTS } from '../content/blueprints';
-import { RUN, type EncounterDef } from '../content/encounters';
+import { encountersFor, RUN, type EncounterDef, type RunMode } from '../content/encounters';
 import { KITS, kitById, type KitDef } from '../content/kits';
 import { RULES, type RuleFlag } from '../content/rules';
 import type { MachineRuleDef } from '../alphabet/rules';
@@ -67,7 +67,7 @@ export class Run {
     this.state = state;
   }
 
-  static create(seed: number, kitId: string): Run {
+  static create(seed: number, kitId: string, mode?: RunMode): Run {
     const kit = kitById(kitId);
     const run = new Run({
       seed,
@@ -86,6 +86,7 @@ export class Run {
       seenRules: [],
       craftsByBlueprint: {},
     });
+    run.mode = mode ?? kit.mode ?? 'standard';
     return run;
   }
 
@@ -107,7 +108,26 @@ export class Run {
     return kitById(this.state.kitId);
   }
 
+  /**
+   * Which encounter list this run plays.
+   *
+   * A property of the run rather than a module global, so the three-encounter V2
+   * evaluation set and the standard run can coexist without either one being a
+   * special case bolted into the screens.
+   */
+  mode: RunMode = 'standard';
+
+  get encounters(): EncounterDef[] {
+    return encountersFor(this.mode);
+  }
+
+  /**
+   * Machine rules are disabled in V2 test mode (brief 3.9): they can hide whether
+   * the base loop is good, and the first question is whether sockets + Focus +
+   * Mark + causal cascade are fun without build-rule complexity.
+   */
   get rules(): MachineRuleDef[] {
+    if (this.mode === 'v2test') return [];
     return this.state.ruleIds
       .map((id) => RULES.find((r) => r.id === id))
       .filter((r): r is MachineRuleDef => !!r);
@@ -118,11 +138,12 @@ export class Run {
   }
 
   encounter(): EncounterDef {
-    return RUN[Math.min(this.state.encounterIndex, RUN.length - 1)];
+    const list = this.encounters;
+    return list[Math.min(this.state.encounterIndex, list.length - 1)];
   }
 
   get isLastEncounter(): boolean {
-    return this.state.encounterIndex >= RUN.length - 1;
+    return this.state.encounterIndex >= this.encounters.length - 1;
   }
 
   get finished(): boolean {
@@ -247,7 +268,15 @@ export class Run {
   }
 
   advance(): void {
-    this.state.encounterIndex = Math.min(this.state.encounterIndex + 1, RUN.length - 1);
+    this.state.encounterIndex = Math.min(this.state.encounterIndex + 1, this.encounters.length - 1);
+    if (this.mode === 'v2test') {
+      // No attrition during V2 evaluation (brief 3.12). The question is whether a
+      // single encounter is intrinsically satisfying to steer; carrying damage
+      // across three fights would punish the player for testing that question.
+      this.state.coreHp = this.state.maxCoreHp;
+      this.state.record.failed = false;
+      return;
+    }
     // Core damage carries between encounters, so the run keeps tension; a
     // fraction is repaired to keep a long run winnable.
     this.state.coreHp = Math.min(

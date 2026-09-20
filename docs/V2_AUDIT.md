@@ -247,3 +247,101 @@ Neither started nor faked:
 2. Then a **third bot** that steers Focus but never marks, to isolate Mark.
 3. Then **dead-watch telemetry**, so pacing claims rest on measurement.
 4. Then V2.7 momentum, then V2.8.
+
+
+---
+
+# Addendum — after V2.9 (the evaluation set) and the bot tool
+
+Recorded after building the three authored encounters, the V2 test kit, and
+`tools/bots.ts` (`npm run bots`). This resolves two of the gaps §9 and §11 flagged.
+
+## The test kit fixes Focus, and the brief's own bag was the problem
+
+Replacing bastion with the three-word set turns Focus from a dead control into a
+working one:
+
+| | bastion | v2test |
+| --- | --- | --- |
+| contested letters per encounter | 1.83 | **7.06** |
+| contested letters Focus actually won | **0** | **123** |
+| fallback (Focus ineligible) | 55 | 4 |
+
+But the brief's §3.10 hypothesis bag — `B B B / O / M / E E / W / A / L L` — is
+the *worst* configuration tested for Focus. The bag covers every socket exactly
+once, so whichever recipe a contested B goes to, all three still finish. Routing
+cannot change the outcome because nothing is scarce.
+
+Measured with `npm run bots`, 6 runs, steer vs passive:
+
+| bag | crafts |
+| --- | --- |
+| `B B B` (brief hypothesis) | +1.4% |
+| **`B B`** (shipped) | **+10.8%** |
+| `B B` with M drawn last | +7.8% |
+
+**Focus only matters when letters are scarce.** That is the design lesson, and it
+is why the shipped bag drops to two B tiles: BOMB wants two of them, BEE wants
+one, so the player cannot satisfy everything from the bag and must choose which
+recipe finishes now and which waits for a carrier. The brief says to run
+simulation before finalising the hypothesis, and the simulation rejected it.
+
+`npm run bots` on the shipped configuration, 10 runs: **steer beats passive by
+11.4% crafts and 10.5% less core damage.** Brief test B's 0–2% threshold for
+"decorative" is comfortably cleared.
+
+## Mark does not matter, and that is now isolated rather than suspected
+
+`steer-nomark` is byte-identical to `steer` except it never marks, so the
+difference between them is exactly the mark's contribution.
+
+| | steer | steer-nomark | difference |
+| --- | --- | --- | --- |
+| crafts | 23.4 | 23.1 | +1.3% |
+| letters recovered | 21.1 | 21.2 | −0.5% |
+| kills | 49.2 | 50.2 | −2.0% |
+
+Within noise, and slightly negative on kills.
+
+A first attempt at this measurement was invalid and is worth recording: the bot
+marked `needed[0]`, which is the *same* carrier BEE's own rule 2 already picks, so
+it measured nothing. Re-running with the bot marking the needed carrier closest to
+the core — a genuinely different choice — changed the result by 1.3%. The mark
+really does not matter.
+
+**Why:** BEE's priority rule 2 ("a carrier whose letter a recipe currently needs")
+already finds a needed carrier without any player input. Choosing *among*
+equally-needed carriers does not change what the machine receives. Mark is
+redundant with a rule the brief specifies two sections earlier.
+
+Per the brief's own test D — "if Mark rarely changes anything, remove or redesign
+it" — this needs a decision, and every option changes the game's identity, so I
+have not made it unilaterally:
+
+1. **Narrow rule 2** so BEE does not seek needed carriers on its own; only a mark
+   makes it hunt a specific one. Mark becomes the extraction tool the brief
+   describes, at the cost of BEE being less useful unmarked.
+2. **Add a second object that respects Mark** (the brief allows this: "future
+   hunter/homing objects may respect Mark"), so the mark has a wider effect.
+3. **Remove Mark** and keep the three mechanics that do work.
+
+Mark is left implemented, tested and visible in the meantime. It is not harmful;
+it is just currently free.
+
+## Dead-watch time is measured, and it is not the problem
+
+§8 flagged dead-watch as unmeasured. It is now instrumented.
+
+**0.0–0.1% of fight time has an empty field** across all kits — 0.1 s in total.
+Encounters do not have dead air. The over-length encounters are not caused by the
+player watching nothing.
+
+What the measurement did surface instead: **craft beats occupy 27–33% of fight
+time.** At ~0.82 s per craft and ~7 crafts, roughly a third of every encounter is
+the completion animation. That is the hero moment, so some of it is the point, and
+combat continues underneath so it is not stalling — but a third is a lot, and the
+brief's §4.3 says the beat must be re-tested now that sockets are visible. It has
+not been tuned.
+
+Encounter length is unchanged at ~17 s against an 8–15 s target and remains the
+largest outstanding pacing gap.

@@ -22,9 +22,32 @@ export interface KitDef {
   wildcards: number;
   /** Drives the kit card's accent colour and the bag display. */
   color: string;
+  /**
+   * Selects the encounter list. `v2test` plays the three authored evaluation
+   * encounters with no machine rules and no attrition across them (brief 3.12).
+   */
+  mode?: 'standard' | 'v2test';
 }
 
 export const KITS: KitDef[] = [
+  {
+    id: 'v2test',
+    name: L('BỘ THỬ V2', 'V2 TEST SET'),
+    tagline: L('Bom · Ong · Tường', 'Bomb · Bee · Wall'),
+    how: L(
+      'Ba từ cùng tranh chữ B. Ưu tiên quyết định chữ B rơi vào từ nào.',
+      'All three words contest the letter B. Focus decides which one gets it.',
+    ),
+    blueprints: ['BOMB', 'BEE', 'WALL'],
+    // Exactly one of each recipe, plus one spare B. The bag covers every socket
+    // once and the three B tiles are each a real decision: BOMB has two B
+    // sockets and BEE has one (brief 3.10).
+    bag: ['B','B','O','M','E','E','W','A','L','L'],
+    coreHp: 100,
+    wildcards: 1,
+    color: '#a274f5',
+    mode: 'v2test',
+  },
   {
     id: 'assembly',
     name: L('DÂY CHUYỀN', 'THE ASSEMBLY'),

@@ -228,6 +228,109 @@ export const RUN: EncounterDef[] = [
   }),
 ];
 
+/**
+ * The V2 evaluation set (rework brief 3.11).
+ *
+ * Three purpose-built encounters, not a difficulty curve. Each one exists to make
+ * a single mechanic undeniable, and the set is meant to be played in order:
+ *
+ *   A  Cluster / Ignition  - BOMB should feel excellent, and the player should see
+ *                            word -> object -> kill -> letter -> word once.
+ *   B  Carrier Hunt        - BEE and Mark should matter, and BOMB should NOT be
+ *                            able to solve it.
+ *   C  Control / Wall      - WALL should matter without dealing damage, and the
+ *                            player should discover WALL -> clustering -> BOMB
+ *                            from the battlefield rather than a tooltip.
+ *
+ * Deliberately small: 3 encounters, three blueprints, one kit. The question these
+ * answer is "is the combat loop good", and a longer run only obscures that.
+ */
+export const V2_TEST: EncounterDef[] = [
+  E({
+    id: 'v2a-cluster',
+    chapter: 1,
+    name: L('Cụm / Mồi', 'Cluster / Ignition'),
+    kind: 'tutorial',
+    hpMul: 1,
+    speedMul: 1,
+    // BOMB is one socket short on purpose: its final B can come from the bag or
+    // from a carrier, and either way the player watches the row complete.
+    openingPool: ['B', 'O', 'M'],
+    waves: [
+      { at: 0.3, kind: 'mote', count: 4, gap: 0.42, lane: 'spread' },
+      { at: 2.2, kind: 'mote', count: 5, gap: 0.36, lane: 'spread' },
+      { at: 4.6, kind: 'mote', count: 6, gap: 0.32, lane: 'spread' },
+      { at: 7.2, kind: 'mote', count: 7, gap: 0.3, lane: 'spread' },
+    ],
+    guaranteed: ['B', 'E', 'E', 'W', 'A'],
+    unknownCarriers: 3,
+    rewardProfile: 'mixed',
+    hint: L(
+      'Bom dọn cả cụm. Chữ nó nhả ra sẽ mở khoá từ kế tiếp.',
+      'Bombs clear the pile. The letters they release unlock the next word.',
+    ),
+    teaches: 'craft',
+  }),
+  E({
+    id: 'v2b-hunt',
+    chapter: 1,
+    name: L('Săn kẻ mang chữ', 'Carrier Hunt'),
+    kind: 'normal',
+    hpMul: 1.2,
+    speedMul: 1.05,
+    // BEE one socket short. Its remaining E is on a carrier the player has to
+    // decide to go and get.
+    openingPool: ['B', 'E'],
+    waves: [
+      // A screen of cheap ground units in front, so the wanted carrier is not
+      // simply the leftmost thing on the field.
+      { at: 0.3, kind: 'mote', count: 5, gap: 0.3, lane: 'spread' },
+      { at: 1.7, kind: 'flyer', count: 1, gap: 0, lane: 3 },
+      { at: 3.2, kind: 'runner', count: 3, gap: 0.65, lane: 'spread' },
+      { at: 5.2, kind: 'flyer', count: 2, gap: 1.2, lane: 'spread' },
+      { at: 7.6, kind: 'mote', count: 7, gap: 0.28, lane: 'spread' },
+    ],
+    guaranteed: ['E', 'A', 'L', 'L', 'B'],
+    unknownCarriers: 4,
+    rewardProfile: 'mixed',
+    hint: L(
+      'Chữ cần nằm trên kẻ bay. Đánh dấu nó để ong săn trước.',
+      'The letter you need is on something flying. Mark it and the bee hunts it first.',
+    ),
+    teaches: 'carrier',
+  }),
+  E({
+    id: 'v2c-wall',
+    chapter: 1,
+    name: L('Chặn / Dồn', 'Control / Wall'),
+    kind: 'normal',
+    hpMul: 1.1,
+    speedMul: 1.3,
+    openingPool: ['W', 'A', 'L'],
+    waves: [
+      // Fast, spread-out runners. Nothing here is threatening on its own; what
+      // makes them dangerous is arriving as a stream, which is what WALL is for.
+      { at: 0.3, kind: 'runner', count: 4, gap: 0.55, lane: 'spread' },
+      { at: 2.6, kind: 'runner', count: 5, gap: 0.5, lane: 'spread' },
+      { at: 5.4, kind: 'brute', count: 2, gap: 1.4, lane: 2 },
+      { at: 7.2, kind: 'runner', count: 6, gap: 0.4, lane: 'spread' },
+    ],
+    guaranteed: ['L', 'B', 'B', 'O', 'M'],
+    unknownCarriers: 3,
+    rewardProfile: 'mixed',
+    hint: L(
+      'Tường không gây sát thương. Nó dồn chúng lại thành một cụm.',
+      'The wall deals no damage. It piles them up into one cluster.',
+    ),
+    teaches: null,
+  }),
+];
+
+/** Which encounter list a run plays. */
+export type RunMode = 'standard' | 'v2test';
+
+export const encountersFor = (mode: RunMode): EncounterDef[] => (mode === 'v2test' ? V2_TEST : RUN);
+
 export const encounterById = (id: string): EncounterDef => {
   const found = RUN.find((e) => e.id === id);
   if (!found) throw new Error(`unknown encounter: ${id}`);

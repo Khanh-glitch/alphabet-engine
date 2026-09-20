@@ -157,6 +157,8 @@ export interface Strings {
   // Tutorial
   hintFirstCraft: string;
   hintCarrier: string;
+  mark: string;
+  markHint: string;
   hintWildcard: string;
   hintReward: string;
   hintPool: string;
@@ -308,6 +310,8 @@ const vi: Strings = {
 
   hintFirstCraft: 'Đủ chữ là tự ghép. Cứ để dây chuyền chạy.',
   hintCarrier: 'Kẻ địch mang chữ. Hạ nó để lấy chữ về kho.',
+  mark: 'ĐÁNH DẤU',
+  markHint: 'Bấm một kẻ địch để BEE săn nó trước',
   hintWildcard: 'Chữ ? điền đúng một chữ còn thiếu. Chọn công thức.',
   hintReward: 'Chọn 1 thay đổi cho dây chuyền của bạn.',
   hintPool: 'Chữ trong kho sẽ tự lắp vào công thức.',
@@ -458,6 +462,8 @@ const en: Strings = {
 
   hintFirstCraft: 'Full recipes craft themselves. Just keep the chain fed.',
   hintCarrier: 'Enemies carry letters. Kill them to feed your pool.',
+  mark: 'MARK',
+  markHint: 'Click an enemy to make BEE hunt it first',
   hintWildcard: 'The ? fills one missing letter. Pick a blueprint.',
   hintReward: 'Pick one change for your engine.',
   hintPool: 'Letters in the pool auto-fill your recipes.',

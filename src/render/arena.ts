@@ -632,7 +632,21 @@ function enemyTop(enemy: Enemy): number {
   }
 }
 
-function drawEnemy(g: Ctx, enemy: Enemy, t: number): void {
+/**
+ * Screen-space bounds of an enemy's body.
+ *
+ * Exported because the player marks enemies by clicking them, and a click target
+ * that does not match what is drawn is its own bug. Derived from the same
+ * scale/foot math the renderer uses.
+ */
+export function enemyHitRect(enemy: Enemy): { x: number; y: number; w: number; h: number } {
+  const lane = clamp(enemy.lane, 0, FIELD.lanes - 1);
+  const s = enemy.size * laneScale(lane) * UNIT;
+  const foot = enemyFoot(enemy);
+  return { x: enemy.x - s * 1.15, y: foot - s * 2.25, w: s * 2.3, h: s * 2.6 };
+}
+
+function drawEnemy(g: Ctx, enemy: Enemy, t: number, marked = false): void {
   const lane = clamp(enemy.lane, 0, FIELD.lanes - 1);
   const scale = laneScale(lane);
   const s = enemy.size * scale * UNIT;
@@ -1060,6 +1074,60 @@ function drawEnemy(g: Ctx, enemy: Enemy, t: number): void {
     g.fill();
   }
   carrierBadge(g, enemy, t);
+  if (marked) markReticle(g, enemy, t);
+}
+
+/**
+ * The Target Mark reticle (brief 3.4.1).
+ *
+ * Deliberately compact and drawn *around* the unit: it must not cover the carried
+ * letter, because the letter is the reason the player marked this enemy in the
+ * first place. No banner, no arrow.
+ */
+function markReticle(g: Ctx, enemy: Enemy, t: number): void {
+  const lane = clamp(enemy.lane, 0, FIELD.lanes - 1);
+  const s = enemy.size * laneScale(lane) * UNIT;
+  const foot = enemyFoot(enemy);
+  const rw = s * 1.75;
+  const rh = s * 2.0;
+  const cx = enemy.x;
+  const cy = foot - s * 1.05;
+  const pulse = 0.62 + Math.sin(t * 7) * 0.22;
+
+  // Rotating corner brackets: reads as a targeting computer rather than a
+  // selection highlight, and survives being scaled down on far lanes.
+  const arm = Math.max(9, s * 0.42);
+  g.save();
+  glow(g, cx, cy, s * 2.2, C.gold, 0.16);
+  g.strokeStyle = rgba(C.gold, pulse);
+  g.lineWidth = 3;
+  for (const [dx, dy] of [
+    [-1, -1],
+    [1, -1],
+    [-1, 1],
+    [1, 1],
+  ]) {
+    const px = cx + dx * rw * 0.5;
+    const py = cy + dy * rh * 0.5;
+    g.beginPath();
+    g.moveTo(px - dx * arm, py);
+    g.lineTo(px, py);
+    g.lineTo(px, py - dy * arm);
+    g.stroke();
+  }
+  // Four ticks orbiting the target, so the mark still reads on a still frame.
+  g.strokeStyle = rgba(C.gold, pulse * 0.7);
+  g.lineWidth = 1.6;
+  for (let i = 0; i < 4; i++) {
+    const a = t * 1.6 + (i * Math.PI) / 2;
+    const ox = Math.cos(a) * rw * 0.62;
+    const oy = Math.sin(a) * rh * 0.62;
+    g.beginPath();
+    g.moveTo(cx + ox - 3, cy + oy);
+    g.lineTo(cx + ox + 3, cy + oy);
+    g.stroke();
+  }
+  g.restore();
 }
 
 function drawEntity(g: Ctx, ent: Entity, t: number): void {
@@ -1373,7 +1441,7 @@ export function drawArena(g: Ctx, battle: Battle, t: number, opts: ArenaOptions)
   drawSpawnStreaks(g, battle);
 
   const enemies = battle.enemies.filter((e) => !e.dead).sort((a, b) => b.lane - a.lane);
-  for (const enemy of enemies) drawEnemy(g, enemy, t);
+  for (const enemy of enemies) drawEnemy(g, enemy, t, enemy.id === battle.markedId);
 
   if (opts.showGuides) {
     // Entry marker: something is about to walk in from this edge.

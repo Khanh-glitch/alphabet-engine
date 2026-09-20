@@ -39,6 +39,11 @@ Phases V2.0, V2.1 and V2.2 are complete and the playable build now runs on the V
 model. See `docs/V2_STATUS.md` for detail and `docs/V2_BASELINE.md` for the
 before numbers.
 
+**V2.3–V2.5 landed:** letters physically travel into the socket they were routed
+to; the wildcard resolves a specific visible socket and travels there; enemies
+can be marked and BEE hunts the mark first. `fx.ts`'s old V1 flying-letter system
+was deleted rather than left running alongside the new one.
+
 **V2.2 landed:** one source of truth for letter state. `Battle.pool` is gone,
 replaced by `Battle.machine`; every letter — bag draw, carrier drop, wildcard,
 rule injection, refund — enters through a single `feed()` gate, which is what

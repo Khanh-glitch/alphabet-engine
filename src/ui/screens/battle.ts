@@ -15,7 +15,7 @@ import { RUN } from '../../content/encounters';
 
 
 import { FxLayer } from '../../render/fx';
-import { drawArena } from '../../render/arena';
+import { drawArena, enemyHitRect } from '../../render/arena';
 import {
   drawHud,
   cardRect,
@@ -189,6 +189,7 @@ export function createBattleScreen(): Screen {
             sfx.wildcard();
             break;
           case 'focus':
+          case 'mark':
             sfx.ui();
             break;
           case 'cleared':
@@ -261,6 +262,17 @@ export function createBattleScreen(): Screen {
       g.save();
       g.translate(shake.x, shake.y);
       drawArena(g, battle, time, { showGuides: true });
+      // Marking is a battlefield click, so enemies register as hit targets in the
+      // same space they are drawn in. The mark changes targeting priority only
+      // (brief 3.4.2) — it never becomes click-to-kill.
+      for (const enemy of battle.enemies) {
+        if (enemy.dead) continue;
+        app.ui.hit(`hud.enemy.${enemy.id}`, enemyHitRect(enemy), {
+          tooltip: enemy.carry
+            ? `${t('mark')}: ${enemy.carry}`
+            : t('mark'),
+        });
+      }
       fx.drawWorld(g);
       g.restore();
 
@@ -406,6 +418,11 @@ export function createBattleScreen(): Screen {
         wildcardMode = false;
         return;
       }
+      if (id.startsWith('hud.enemy.')) {
+        battle.mark(Number(id.split('.')[2]));
+        sfx.ui();
+        return;
+      }
       if (id.startsWith('hud.cardinfo.')) {
         const slot = Number(id.split('.')[2]);
         inspectSlot = inspectSlot === slot ? null : slot;
@@ -452,6 +469,7 @@ export function createBattleScreen(): Screen {
       if (e.key === 'Escape') {
         wildcardMode = false;
         inspectSlot = null;
+        battle.clearMark();
         return true;
       }
       return false;

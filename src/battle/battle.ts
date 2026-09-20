@@ -118,6 +118,14 @@ export class Battle {
   stallTimer = 0;
   stalling = false;
   breaches = 0;
+  /**
+   * The one enemy the player has marked (brief 3.4).
+   *
+   * Mark never causes damage. It only changes targeting priority, and only for
+   * objects that are logically able to act on it — so it is announced as an
+   * intention, not as an order the machine must obey.
+   */
+  markedId = -1;
 
   constructor(cfg: BattleConfig) {
     this.cfg = cfg;
@@ -468,6 +476,36 @@ export class Battle {
     trace.log('wildcard', `điền ${target.missing} vào ô ${target.socket} của ${target.blueprint.word}`);
     this.resolveCompletions();
     return true;
+  }
+
+  // ---- target mark (brief 3.4) -------------------------------------------
+
+  /**
+   * Mark one enemy as the priority target, or clear the mark by marking the same
+   * enemy twice. Returns the enemy now marked, or -1 for none.
+   */
+  mark(enemyId: number): number {
+    const enemy = this.enemies.find((e) => e.id === enemyId && !e.dead);
+    if (!enemy) return this.markedId;
+    this.markedId = this.markedId === enemyId ? -1 : enemyId;
+    if (this.markedId >= 0) {
+      this.v2.marksPlaced += 1;
+      this.emit({ kind: 'mark', enemyId: this.markedId });
+      trace.log('mark', `đánh dấu ${enemy.kind}${enemy.carry ? ` mang ${enemy.carry}` : ''}`);
+    } else {
+      trace.log('mark', 'bỏ đánh dấu');
+    }
+    return this.markedId;
+  }
+
+  clearMark(): void {
+    this.markedId = -1;
+  }
+
+  /** The marked enemy, if it is still alive. */
+  get marked(): Enemy | null {
+    if (this.markedId < 0) return null;
+    return this.enemies.find((e) => e.id === this.markedId && !e.dead) ?? null;
   }
 
   // ---- focus (brief 3.2) -------------------------------------------------
@@ -905,13 +943,34 @@ export class Battle {
   }
 
   private stepBee(ent: Entity, dt: number): void {
-    let target = this.enemies.find((e) => e.id === ent.targetId && !e.dead) ?? null;
-    // BEE + Letter Carrier → priority targeting
-    if (!target) {
-      const carriers = this.carrierTargets().sort((a, b) => a.x - b.x);
-      target = carriers[0] ?? this.leftmostEnemy();
-      ent.targetId = target?.id ?? 0;
+    const current = this.enemies.find((e) => e.id === ent.targetId && !e.dead) ?? null;
+    // BEE is the object the Mark exists for: it extracts letters and it can reach
+    // flying carriers, which is precisely what the mark is usually asking for.
+    // Priority order fixed by the brief (9.2):
+    //   1. the marked target, if still valid
+    //   2. a carrier whose letter a recipe currently needs
+    //   3. any other carrier
+    //   4. the normal fallback
+    // Rule 1 is checked every tick, so marking re-routes a bee already in flight.
+    const marked = this.marked;
+    let target: Enemy | null = null;
+    if (marked) {
+      target = marked;
+    } else if (current) {
+      // Keep the current target unless a better one exists, so bees do not
+      // oscillate between two equally valid carriers.
+      const carriers = this.carrierTargets();
+      const needed = carriers.filter((e) => e.carry && this.machine.wants(e.carry));
+      const better = needed[0] ?? carriers[0] ?? null;
+      target = better && better.id !== current.id ? better : current;
+      if (!current.carry && better) target = better;
     }
+    if (!target) {
+      const carriers = this.carrierTargets();
+      const needed = carriers.filter((e) => e.carry && this.machine.wants(e.carry));
+      target = needed[0] ?? carriers[0] ?? this.leftmostEnemy();
+    }
+    if (target) ent.targetId = target.id;
     if (!target) {
       ent.x += (330 - ent.x) * dt * 1.2;
       ent.y += (210 - ent.y) * dt;
@@ -1162,6 +1221,13 @@ export class Battle {
     if (enemy.hp > 0) return;
     enemy.dead = true;
     this.telemetry.onKill(!!enemy.carry);
+    // Mark telemetry (brief 3.4 / 12.4): a mark only earns its place if killing
+    // the marked enemy measurably changes what the machine receives.
+    if (enemy.id === this.markedId) {
+      this.v2.markedKills += 1;
+      if (enemy.carry) this.v2.lettersFromMarked += 1;
+      this.markedId = -1;
+    }
     const letters: Letter[] = [];
     if (enemy.carry) letters.push(enemy.carry);
     this.emit({ kind: 'kill', x: enemy.x, y: 300 + enemy.lane * 40, letter: enemy.carry, lane: enemy.lane });

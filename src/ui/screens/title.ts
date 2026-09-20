@@ -1,347 +1,195 @@
-/** Title screen: the logo assembles itself out of letter tiles. */
-import { C, F, R, SIZE, T } from '../../theme';
-import { alpha, blob, mix, panel, rr, text, type Ctx } from '../../core/draw';
-import { clamp, easeOutElastic, easeOut } from '../../core/rng';
-import { button } from '../kit';
-import { newRun, hasSave, loadRun, clearRun, saveRun } from '../../game/run';
-import type { App, Screen } from '../../app';
+/** Title screen. The first thing a player sees has to explain the game's idea. */
 
-const WORD1 = 'ALPHABET';
-const WORD2 = 'ENGINE';
 
-interface Drift {
-  x: number;
-  y: number;
-  ch: string;
-  size: number;
-  sp: number;
-  rot: number;
-  vr: number;
-  depth: number;
+import { C, R, T, VIEW } from '../../core/theme';
+import { chip, glow, label, plate, rgba, tile, type Ctx } from '../../core/draw';
+import { t } from '../../core/i18n';
+import type { Screen } from '../../app/app';
+import { BLUEPRINTS, STARTER_BLUEPRINTS } from '../../content/blueprints';
+
+import { store } from '../../core/save';
+
+/** A slowly assembling word — the whole game in one looping animation. */
+const DEMO_WORD: (keyof typeof BLUEPRINTS)[] = ['BOMB', 'FIRE', 'OIL', 'WALL', 'BEE', 'FAN'];
+
+function drawDemo(g: Ctx, time: number, cx: number, cy: number): void {
+  const period = 3.4;
+  const index = Math.floor(time / period) % DEMO_WORD.length;
+  const local = (time % period) / period;
+  const bp = BLUEPRINTS[DEMO_WORD[index]];
+  const letters = bp.recipe;
+  const size = 66;
+  const gap = 8;
+  const totalW = letters.length * size + (letters.length - 1) * gap;
+  const startX = cx - totalW / 2;
+
+  // letters gather, lock, then the object leaves
+  const gather = Math.min(1, local / 0.4);
+  const locked = local > 0.4 && local < 0.72;
+  const leaving = local >= 0.72;
+  const leaveT = leaving ? (local - 0.72) / 0.28 : 0;
+
+  for (let i = 0; i < letters.length; i++) {
+    const targetX = startX + i * (size + gap);
+    const fromX = targetX + (i % 2 === 0 ? -220 : 220);
+    const x = fromX + (targetX - fromX) * gather;
+    const y = cy + Math.sin(gather * Math.PI + i) * -34 * (1 - gather);
+    const press = locked || leaving ? 1 : 0;
+    if (leaving && leaveT > 0.35) continue;
+    tile(g, x, y, size, letters[i], locked || leaving ? 'lock' : 'filled', {
+      press,
+      glow: locked ? C.gold : undefined,
+      alpha: leaving ? 1 - leaveT : 1,
+    });
+  }
+
+  // The object that emerges from the word
+  if (leaving) {
+    const e = Math.min(1, leaveT * 2.4);
+    const ox = cx - totalW / 2 - 40 + e * -140;
+    const oy = cy + 40 + e * 30;
+    g.save();
+    g.globalAlpha = 1 - Math.max(0, (leaveT - 0.6) / 0.4);
+    glow(g, ox + 40, oy, 58, bp.color, 0.4 * e);
+    g.fillStyle = bp.color;
+    g.beginPath();
+    g.arc(ox + 40, oy, 22 * e, 0, Math.PI * 2);
+    g.fill();
+    g.restore();
+  }
+
+  label(g, bp.word, cx, cy + 84, {
+    align: 'center',
+    size: T.small,
+    color: rgba(C.gold, locked || leaving ? 0.95 : 0.4),
+    weight: 800,
+    tracking: 6,
+  });
+  label(g, bp.name.vi.toUpperCase(), cx, cy + 106, {
+    align: 'center',
+    size: T.micro,
+    color: C.faint,
+    weight: 700,
+    tracking: 2,
+  });
 }
 
 export function createTitleScreen(): Screen {
-  let drifts: Drift[] = [];
-  let confirmNew = false;
-  let seedOpen = false;
-  let seedText = '';
-  let t = 0;
+  let time = 0;
 
-  const reset = (): void => {
-    drifts = [];
-    const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-    for (let i = 0; i < 34; i++) {
-      drifts.push({
-        x: Math.random() * SIZE.w,
-        y: Math.random() * SIZE.h,
-        ch: letters[Math.floor(Math.random() * 26)],
-        size: 16 + Math.random() * 40,
-        sp: 6 + Math.random() * 22,
-        rot: (Math.random() - 0.5) * 0.7,
-        vr: (Math.random() - 0.5) * 0.5,
-        depth: Math.random(),
-      });
-    }
-  };
-
-  const tileAt = (index: number, count: number, cx: number, y: number, size: number, gap: number) => {
-    const total = count * (size + gap) - gap;
-    return { x: cx - total / 2 + index * (size + gap) + size / 2, y };
-  };
-
-  const drawWord = (
-    g: Ctx,
-    word: string,
-    cx: number,
-    y: number,
-    size: number,
-    gap: number,
-    delay: number,
-    time: number,
-    ink: string,
-  ): void => {
-    for (let i = 0; i < word.length; i++) {
-      const p = clamp((time - delay - i * 0.055) / 0.75, 0, 1);
-      const pos = tileAt(i, word.length, cx, y, size, gap);
-      const startY = y - 140 - i * 12;
-      const yy = startY + (y - startY) * easeOut(p);
-      const settle = p >= 1 ? Math.sin((time - delay - i * 0.055) * 1.6) * 1.6 : 0;
-      const a = p < 0.02 ? 0 : 1;
-      g.save();
-      g.globalAlpha = a;
-      if (p < 1) {
-        g.shadowBlur = 26 * (1 - p);
-        g.shadowColor = alpha(C.gold, 0.7);
-      }
-      const sc = p < 1 ? 0.9 + 0.1 * easeOutElastic(p) : 1;
-      g.translate(pos.x, yy + settle);
-      g.scale(sc, sc);
-      rr(g, -size / 2, -size / 2, size, size, size * 0.18);
-      const grad = g.createLinearGradient(0, -size / 2, 0, size / 2);
-      grad.addColorStop(0, mix(C.panelHi, ink, 0.1));
-      grad.addColorStop(1, C.bg1);
-      g.fillStyle = grad;
-      g.fill();
-      rr(g, -size / 2 + 0.5, -size / 2 + 0.5, size - 1, size - 1, size * 0.18);
-      g.strokeStyle = alpha(ink, 0.22);
-      g.lineWidth = 1;
-      g.stroke();
-      text(g, word[i], 0, size * 0.04, {
-        font: F.slab,
-        weight: 800,
-        size: size * 0.62,
-        color: ink,
-        align: 'center',
-        baseline: 'middle',
-      });
-      g.restore();
-    }
-  };
-
-  const screen: Screen = {
+  return {
     id: 'title',
-    enter() {
-      reset();
-      t = 0;
-      confirmNew = false;
-      seedOpen = false;
-      seedText = '';
+    enter(app) {
+      time = 0;
+      void app;
     },
     update(dt) {
-      t += dt;
-      for (const d of drifts) {
-        d.y -= d.sp * dt * (0.4 + d.depth);
-        d.rot += d.vr * dt;
-        if (d.y < -60) {
-          d.y = SIZE.h + 60;
-          d.x = Math.random() * SIZE.w;
-        }
-      }
-    },
-    key(e, app) {
-      if (seedOpen) {
-        if (e.key === 'Backspace') {
-          seedText = seedText.slice(0, -1);
-          return true;
-        }
-        if (e.key === 'Enter') {
-          startRun(app, seedText || undefined);
-          return true;
-        }
-        if (e.key === 'Escape') {
-          seedOpen = false;
-          return true;
-        }
-        if (/^[a-zA-Z0-9]{1}$/.test(e.key) && seedText.length < 12) {
-          seedText += e.key.toUpperCase();
-          return true;
-        }
-        return true;
-      }
-      if (e.key === 'Enter' || e.key === ' ') {
-        startRun(app, undefined);
-        return true;
-      }
-      return false;
+      time += dt;
     },
     draw(g, app) {
-      // backdrop
-      const bg = g.createLinearGradient(0, 0, SIZE.w * 0.4, SIZE.h);
-      bg.addColorStop(0, '#0b0e1a');
-      bg.addColorStop(0.55, '#0a0c16');
-      bg.addColorStop(1, '#07080f');
-      g.fillStyle = bg;
-      g.fillRect(0, 0, SIZE.w, SIZE.h);
-      blob(g, SIZE.w * 0.18, SIZE.h * 0.22, 460, C.violet, 0.16);
-      blob(g, SIZE.w * 0.84, SIZE.h * 0.8, 520, C.cyan, 0.1);
-      blob(g, SIZE.w * 0.5, SIZE.h * 0.12, 420, C.gold, 0.07);
+      // Bed
+      const grad = g.createLinearGradient(0, 0, 0, VIEW.h);
+      grad.addColorStop(0, '#070b14');
+      grad.addColorStop(0.6, '#0b1120');
+      grad.addColorStop(1, '#070a12');
+      g.fillStyle = grad;
+      g.fillRect(0, 0, VIEW.w, VIEW.h);
 
-      // drifting letters
-      for (const d of drifts) {
-        g.save();
-        g.globalAlpha = 0.05 + d.depth * 0.09;
-        g.translate(d.x, d.y);
-        g.rotate(d.rot);
-        text(g, d.ch, 0, 0, {
-          font: F.slab,
-          weight: 800,
-          size: d.size,
-          color: d.depth > 0.6 ? C.cyan : C.ink,
-          align: 'center',
-          baseline: 'middle',
-        });
-        g.restore();
+      // Faint machinery grid
+      g.strokeStyle = rgba(C.line, 0.22);
+      g.lineWidth = 1;
+      for (let x = 0; x < VIEW.w; x += 72) {
+        g.beginPath();
+        g.moveTo(x, 0);
+        g.lineTo(x, VIEW.h);
+        g.stroke();
+      }
+      for (let y = 0; y < VIEW.h; y += 72) {
+        g.beginPath();
+        g.moveTo(0, y);
+        g.lineTo(VIEW.w, y);
+        g.stroke();
       }
 
-      // logo plinth
-      const cx = SIZE.w / 2;
-      blob(g, cx, 300, 380, C.gold, 0.1);
+      // Title block
+      const lx = 120;
+      label(g, 'ALPHABET', lx, 250, { size: 86, color: C.ink, weight: 800, tracking: 2 });
+      label(g, 'ENGINE', lx, 336, { size: 86, color: C.gold, weight: 800, tracking: 2 });
+      g.strokeStyle = rgba(C.gold, 0.5);
+      g.lineWidth = 3;
+      g.beginPath();
+      g.moveTo(lx, 366);
+      g.lineTo(lx + 430, 366);
+      g.stroke();
+      label(g, t('gameTagline'), lx, 404, { size: T.lead, color: C.dim, weight: 500 });
+      label(g, 'Tab / Enter để chọn · Esc để quay lại', lx, 740, { size: T.micro, color: rgba(C.faint, 0.8), weight: 600 });
 
-      const size = 74;
-      const gap = 8;
-      drawWord(g, WORD1, cx, 232, size, gap, 0.25, t, C.ink);
-      drawWord(g, WORD2, cx, 232 + size + gap, size, gap, 0.62, t, C.gold);
-
-      const sub = clamp((t - 1.5) / 0.7, 0, 1);
-      g.save();
-      g.globalAlpha = sub;
-      text(g, 'LETTERS BECOME WEAPONS  ·  WEAPONS FEED CASCADES', cx, 232 + (size + gap) * 2 + 22, {
-        size: T.small,
-        weight: 700,
-        color: C.dim,
-        font: F.ui,
-        align: 'center',
-        baseline: 'middle',
-        track: 3.4,
+      // Three pillars, stated once, plainly.
+      const pillars: [string, string, string][] = [
+        ['TÚI CHỮ', 'Chữ bạn sở hữu', C.cyan],
+        ['CÔNG THỨC', 'Từ ghép thành vật thể', C.gold],
+        ['LUẬT MÁY', 'Đổi cách dây chuyền chạy', C.violet],
+      ];
+      pillars.forEach(([title, sub, tone], i) => {
+        const y = 452 + i * 58;
+        chip(g, lx, y, title, tone as string, { font: T.tiny });
+        label(g, sub, lx + 128, y + 18, { size: T.small, color: C.dim, weight: 500 });
       });
-      g.restore();
 
-      // menu
-      const bw = 300;
-      const bx = cx - bw / 2;
-      let by = 470;
-      const sub2 = clamp((t - 1.8) / 0.6, 0, 1);
-      g.save();
-      g.globalAlpha = sub2;
-      const saved = hasSave();
-      if (!confirmNew) {
-        button(g, app.kit, {
-          id: 'new',
-          x: bx,
-          y: by,
-          w: bw,
-          h: 54,
-          label: saved ? 'NEW RUN' : 'BEGIN',
-          icon: 'play',
-          tone: 'primary',
-          size: T.body,
-          glow: true,
+      drawDemo(g, time, 1040, 328);
+
+      // Buttons
+      const bx = 120;
+      const bw = 330;
+      const bh = 54;
+      let by = 610;
+      const hasRun = !!store.suspendedRun;
+      if (hasRun) {
+        app.ui.button(g, 'title.continue', { x: bx, y: by, w: bw, h: bh }, {
+          label: t('continueRun'),
+          tone: C.mint,
+          fontSize: T.body,
         });
         by += 64;
-        if (saved) {
-          button(g, app.kit, {
-            id: 'continue',
-            x: bx,
-            y: by,
-            w: bw,
-            h: 46,
-            label: 'CONTINUE RUN',
-            icon: 'arrow',
-            tone: 'secondary',
-          });
-          by += 56;
-        }
-        button(g, app.kit, {
-          id: 'seed',
-          x: bx,
-          y: by,
-          w: bw,
-          h: 40,
-          label: seedOpen ? `SEED  ${seedText || '_'}` : 'SET SEED',
-          tone: 'ghost',
-          size: T.small,
-        });
-        by += 50;
-        button(g, app.kit, {
-          id: 'help',
-          x: bx,
-          y: by,
-          w: bw,
-          h: 40,
-          label: 'HOW TO PLAY',
-          tone: 'ghost',
-          size: T.small,
-        });
-      } else {
-        panel(g, bx, by - 10, bw, 150, { fill: 'rgba(10,12,22,0.95)', stroke: alpha(C.bad, 0.5), r: R.lg });
-        text(g, 'A RUN IS IN PROGRESS', cx, by + 20, {
-          size: T.small,
-          weight: 700,
-          color: C.bad,
-          font: F.ui,
-          align: 'center',
-          baseline: 'middle',
-          track: 1.4,
-        });
-        text(g, 'Starting over discards it.', cx, by + 44, {
-          size: T.small,
-          weight: 500,
-          color: C.dim,
-          font: F.ui,
-          align: 'center',
-          baseline: 'middle',
-        });
-        button(g, app.kit, {
-          id: 'new-confirm',
-          x: bx + 16,
-          y: by + 66,
-          w: bw / 2 - 24,
-          h: 44,
-          label: 'DISCARD',
-          tone: 'danger',
-        });
-        button(g, app.kit, {
-          id: 'new-cancel',
-          x: bx + bw / 2 + 8,
-          y: by + 66,
-          w: bw / 2 - 24,
-          h: 44,
-          label: 'KEEP',
-          tone: 'secondary',
-        });
       }
-      g.restore();
-
-      // footer
-      g.save();
-      g.globalAlpha = 0.75;
-      text(g, 'v0.1  ·  EVERY WORD IS A WEAPON  ·  EVERY KILL FEEDS THE NEXT', cx, SIZE.h - 28, {
-        size: T.micro + 1,
-        weight: 700,
-        color: C.faint,
-        font: F.num,
-        align: 'center',
-        baseline: 'middle',
-        track: 2.2,
+      app.ui.button(g, 'title.new', { x: bx, y: by, w: bw, h: bh }, {
+        label: t('newRun'),
+        tone: C.gold,
+        fontSize: T.body,
       });
-      g.restore();
+      by += 64;
+      app.ui.button(g, 'title.codex', { x: bx, y: by, w: bw / 2 - 6, h: 46 }, {
+        label: t('codex'),
+        variant: 'ghost',
+        tone: C.cyan,
+      });
+      app.ui.button(g, 'title.settings', { x: bx + bw / 2 + 6, y: by, w: bw / 2 - 6, h: 46 }, {
+        label: t('settings'),
+        variant: 'ghost',
+        tone: C.violet,
+      });
+
+      // Starter set strip: the vocabulary the player will actually use
+      label(g, 'BỘ TỪ KHỞI ĐẦU', 890, 574, {
+        size: T.micro,
+        color: C.faint,
+        weight: 800,
+        tracking: 2.4,
+      });
+      STARTER_BLUEPRINTS.forEach((bp, i) => {
+        const x = 890 + (i % 3) * 124;
+        const y = 592 + Math.floor(i / 3) * 80;
+        plate(g, x, y, 104, 66, { radius: R.sm, fill: '#131b2e', edge: rgba(bp.color, 0.5), depth: 4 });
+        label(g, bp.word, x + 52, y + 28, { align: 'center', size: T.tiny, color: C.ink, weight: 800, tracking: 1.6 });
+        label(g, bp.name.vi, x + 52, y + 50, { align: 'center', size: 11, color: bp.color, weight: 700 });
+      });
+
     },
     click(id, app) {
-      switch (id) {
-        case 'new':
-          if (hasSave()) confirmNew = true;
-          else startRun(app, seedText || undefined);
-          break;
-        case 'new-confirm':
-          clearRun();
-          startRun(app, seedText || undefined);
-          break;
-        case 'new-cancel':
-          confirmNew = false;
-          break;
-        case 'continue': {
-          const run = loadRun();
-          if (run) {
-            app.run = run;
-            app.goto('forge');
-          } else app.toast('Save was unreadable', C.bad);
-          break;
-        }
-        case 'seed':
-          seedOpen = !seedOpen;
-          break;
-        case 'help':
-          app.goto('help');
-          break;
-      }
+      if (id === 'title.new') app.goto('kit');
+      else if (id === 'title.continue') app.goto('battle', { keepOverlay: false });
+      else if (id === 'title.codex') app.goto('codex');
+      else if (id === 'title.settings') app.goto('settings');
     },
   };
-
-  return screen;
-}
-
-function startRun(app: App, seed?: string): void {
-  app.run = newRun(seed);
-  saveRun(app.run);
-  app.goto('forge');
 }

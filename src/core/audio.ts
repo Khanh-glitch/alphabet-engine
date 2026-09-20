@@ -1,241 +1,188 @@
-/** Procedural sound effects - no audio files, everything is synthesised. */
-import type { Trait } from '../game/types';
+/**
+ * Procedural audio.
+ *
+ * No sample assets: every sound is synthesised, which keeps the build small and
+ * lets the cascade ladder rise in pitch with chain depth. Silently degrades when
+ * Web Audio is unavailable (headless rendering, autoplay locks).
+ */
+type Ctx = AudioContext;
 
 class Sfx {
-  private ctx: AudioContext | null = null;
+  private ctx: Ctx | null = null;
   private master: GainNode | null = null;
-  muted = false;
+  private musicGain: GainNode | null = null;
+  private sfxGain: GainNode | null = null;
+  private musicTimer: number | null = null;
+  private step = 0;
+  settings = { master: 0.8, music: 0.5, sfx: 0.8 };
 
-  constructor() {
-    const saved = safeGet('ae.muted');
-    this.muted = saved === '1';
+  private ensure(): Ctx | null {
+    if (typeof window === 'undefined') return null;
+    if (this.ctx) return this.ctx;
+    try {
+      const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!Ctor) return null;
+      this.ctx = new Ctor();
+      this.master = this.ctx.createGain();
+      this.master.gain.value = this.settings.master;
+      this.master.connect(this.ctx.destination);
+      this.sfxGain = this.ctx.createGain();
+      this.sfxGain.gain.value = this.settings.sfx;
+      this.sfxGain.connect(this.master);
+      this.musicGain = this.ctx.createGain();
+      this.musicGain.gain.value = this.settings.music * 0.5;
+      this.musicGain.connect(this.master);
+      return this.ctx;
+    } catch {
+      return null;
+    }
   }
 
-  /** Must be called from a user gesture to satisfy autoplay policies. */
   unlock(): void {
-    if (this.ctx) {
-      if (this.ctx.state === 'suspended') void this.ctx.resume();
-      return;
-    }
-    type WinAudio = Window & { webkitAudioContext?: typeof AudioContext };
-    const Ctor = window.AudioContext ?? (window as WinAudio).webkitAudioContext;
-    if (!Ctor) return;
-    this.ctx = new Ctor();
-    this.master = this.ctx.createGain();
-    this.master.gain.value = this.muted ? 0 : 0.5;
-    this.master.connect(this.ctx.destination);
+    const ctx = this.ensure();
+    if (ctx && ctx.state === 'suspended') void ctx.resume();
   }
 
-  setMuted(m: boolean): void {
-    this.muted = m;
-    safeSet('ae.muted', m ? '1' : '0');
-    if (this.master && this.ctx) {
-      this.master.gain.cancelScheduledValues(this.ctx.currentTime);
-      this.master.gain.setTargetAtTime(m ? 0 : 0.5, this.ctx.currentTime, 0.03);
-    }
+  applySettings(s: { master: number; music: number; sfx: number }): void {
+    this.settings = { ...s };
+    if (this.master) this.master.gain.value = s.master;
+    if (this.sfxGain) this.sfxGain.gain.value = s.sfx;
+    if (this.musicGain) this.musicGain.gain.value = s.music * 0.5;
   }
 
-  private tone(o: {
-    freq: number;
-    to?: number;
-    dur?: number;
-    type?: OscillatorType;
-    gain?: number;
-    delay?: number;
-    attack?: number;
-    detune?: number;
-    lp?: number;
-  }): void {
-    if (!this.ctx || !this.master || this.muted) return;
-    const t0 = this.ctx.currentTime + (o.delay ?? 0);
-    const dur = o.dur ?? 0.12;
-    const osc = this.ctx.createOscillator();
-    osc.type = o.type ?? 'triangle';
-    osc.frequency.setValueAtTime(o.freq, t0);
-    if (o.to) osc.frequency.exponentialRampToValueAtTime(Math.max(20, o.to), t0 + dur);
-    if (o.detune) osc.detune.value = o.detune;
-    const g = this.ctx.createGain();
-    const peak = Math.max(0.0001, o.gain ?? 0.2);
-    const atk = o.attack ?? 0.005;
-    g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(peak, t0 + atk);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-    let node: AudioNode = g;
-    if (o.lp) {
-      const f = this.ctx.createBiquadFilter();
-      f.type = 'lowpass';
-      f.frequency.value = o.lp;
-      g.connect(f);
-      node = f;
-    }
-    osc.connect(g);
-    node.connect(this.master);
-    osc.start(t0);
-    osc.stop(t0 + dur + 0.03);
+  private tone(
+    freq: number,
+    dur: number,
+    type: OscillatorType,
+    gain: number,
+    slideTo?: number,
+  ): void {
+    const ctx = this.ensure();
+    if (!ctx || !this.sfxGain) return;
+    const osc = ctx.createOscillator();
+    const env = ctx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, ctx.currentTime);
+    if (slideTo !== undefined) osc.frequency.exponentialRampToValueAtTime(Math.max(30, slideTo), ctx.currentTime + dur);
+    env.gain.setValueAtTime(0, ctx.currentTime);
+    env.gain.linearRampToValueAtTime(gain, ctx.currentTime + 0.008);
+    env.gain.exponentialRampToValueAtTime(0.0008, ctx.currentTime + dur);
+    osc.connect(env).connect(this.sfxGain);
+    osc.start();
+    osc.stop(ctx.currentTime + dur + 0.02);
   }
 
-  private noise(o: { dur?: number; gain?: number; lp?: number; hp?: number; delay?: number }): void {
-    if (!this.ctx || !this.master || this.muted) return;
-    const t0 = this.ctx.currentTime + (o.delay ?? 0);
-    const dur = o.dur ?? 0.2;
-    const n = Math.floor(this.ctx.sampleRate * dur);
-    const buf = this.ctx.createBuffer(1, n, this.ctx.sampleRate);
-    const data = buf.getChannelData(0);
-    for (let i = 0; i < n; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / n);
-    const src = this.ctx.createBufferSource();
-    src.buffer = buf;
-    const g = this.ctx.createGain();
-    g.gain.value = o.gain ?? 0.2;
-    let node: AudioNode = g;
-    if (o.lp) {
-      const f = this.ctx.createBiquadFilter();
-      f.type = 'lowpass';
-      f.frequency.value = o.lp;
-      g.connect(f);
-      node = f;
-    }
-    if (o.hp) {
-      const f = this.ctx.createBiquadFilter();
-      f.type = 'highpass';
-      f.frequency.value = o.hp;
-      node.connect(f);
-      node = f;
-    }
-    src.connect(g);
-    node.connect(this.master);
-    src.start(t0);
+  private noise(dur: number, gain: number, freq: number, q = 1): void {
+    const ctx = this.ensure();
+    if (!ctx || !this.sfxGain) return;
+    const frames = Math.floor(ctx.sampleRate * dur);
+    const buffer = ctx.createBuffer(1, frames, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < frames; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / frames);
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = freq;
+    filter.Q.value = q;
+    const env = ctx.createGain();
+    env.gain.value = gain;
+    src.connect(filter).connect(env).connect(this.sfxGain);
+    src.start();
   }
 
-  // ---- cues --------------------------------------------------------------
   ui(): void {
-    this.tone({ freq: 520, to: 700, dur: 0.06, gain: 0.09, type: 'square', lp: 2400 });
+    this.tone(520, 0.06, 'square', 0.06, 700);
   }
-  uiBack(): void {
-    this.tone({ freq: 420, to: 300, dur: 0.07, gain: 0.08, type: 'square', lp: 2000 });
-  }
-  place(i: number): void {
-    this.tone({ freq: 300 + i * 46, to: 380 + i * 46, dur: 0.07, gain: 0.16, type: 'triangle' });
-    this.noise({ dur: 0.05, gain: 0.05, hp: 2200 });
-  }
-  lift(): void {
-    this.tone({ freq: 240, to: 330, dur: 0.05, gain: 0.08, type: 'sine' });
-  }
-  forge(name: string): void {
-    const base = 200 + Math.min(9, name.length) * 22;
-    this.tone({ freq: base, to: base * 1.5, dur: 0.16, gain: 0.16, type: 'sawtooth', lp: 1800 });
-    this.tone({ freq: base * 2, to: base * 3, dur: 0.22, gain: 0.08, type: 'sine', delay: 0.03 });
-    this.noise({ dur: 0.18, gain: 0.07, lp: 3000 });
-  }
-  reject(): void {
-    this.tone({ freq: 150, to: 90, dur: 0.14, gain: 0.12, type: 'square', lp: 900 });
-  }
-  hit(trait: Trait): void {
-    switch (trait) {
-      case 'BLAST':
-        this.noise({ dur: 0.26, gain: 0.22, lp: 1400 });
-        this.tone({ freq: 120, to: 46, dur: 0.28, gain: 0.2, type: 'sawtooth', lp: 700 });
-        break;
-      case 'CHILL':
-        this.tone({ freq: 1400, to: 900, dur: 0.14, gain: 0.07, type: 'sine' });
-        this.noise({ dur: 0.16, gain: 0.08, hp: 3200 });
-        break;
-      case 'CHAIN':
-        this.tone({ freq: 900, to: 1500, dur: 0.1, gain: 0.08, type: 'square', lp: 3200 });
-        break;
-      case 'PIERCE':
-        this.tone({ freq: 1800, to: 700, dur: 0.09, gain: 0.08, type: 'sawtooth', lp: 4200 });
-        break;
-      case 'HEAVY':
-        this.tone({ freq: 160, to: 60, dur: 0.2, gain: 0.2, type: 'triangle', lp: 800 });
-        break;
-      case 'SPLIT':
-        this.tone({ freq: 700, to: 1100, dur: 0.08, gain: 0.08, type: 'triangle' });
-        this.tone({ freq: 950, to: 600, dur: 0.1, gain: 0.06, type: 'triangle', delay: 0.05 });
-        break;
-      default:
-        this.tone({ freq: 420, to: 240, dur: 0.08, gain: 0.1, type: 'triangle' });
-        this.noise({ dur: 0.09, gain: 0.09, lp: 2600 });
-    }
-  }
-  kill(): void {
-    this.tone({ freq: 260, to: 70, dur: 0.3, gain: 0.16, type: 'sawtooth', lp: 900 });
-    this.noise({ dur: 0.24, gain: 0.12, lp: 1800 });
-  }
-  spawn(): void {
-    this.tone({ freq: 90, to: 200, dur: 0.3, gain: 0.13, type: 'sawtooth', lp: 700 });
-  }
-  coin(): void {
-    this.tone({ freq: 1180, dur: 0.06, gain: 0.1, type: 'square', lp: 4000 });
-    this.tone({ freq: 1560, dur: 0.1, gain: 0.08, type: 'square', lp: 4000, delay: 0.05 });
-  }
-  cascade(link: number, letters: number, mult: number): void {
-    const base = 420 * Math.pow(1.1225, Math.min(18, link));
-    this.tone({ freq: base, to: base * 1.28, dur: 0.22, gain: 0.15, type: 'triangle' });
-    this.tone({
-      freq: base * 1.5,
-      to: base * 1.5,
-      dur: 0.3,
-      gain: 0.1,
-      type: 'sine',
-      delay: 0.06,
-    });
-    if (mult >= 3) {
-      this.tone({ freq: base * 2, dur: 0.4, gain: 0.08, type: 'sine', delay: 0.12 });
-    }
-    if (letters >= 6) this.noise({ dur: 0.4, gain: 0.08, hp: 1800 });
-  }
-  tick(): void {
-    this.tone({ freq: 900, dur: 0.03, gain: 0.05, type: 'square', lp: 3600 });
-  }
-  damage(): void {
-    this.tone({ freq: 220, to: 120, dur: 0.2, gain: 0.18, type: 'square', lp: 1000 });
-  }
-  win(): void {
-    [0, 4, 7, 12].forEach((semi, i) =>
-      this.tone({
-        freq: 440 * Math.pow(2, semi / 12),
-        dur: 0.5,
-        gain: 0.13,
-        type: 'triangle',
-        delay: i * 0.09,
-      }),
-    );
-  }
-  lose(): void {
-    [0, -3, -7, -12].forEach((semi, i) =>
-      this.tone({
-        freq: 330 * Math.pow(2, semi / 12),
-        dur: 0.7,
-        gain: 0.14,
-        type: 'sawtooth',
-        lp: 1200,
-        delay: i * 0.16,
-      }),
-    );
-  }
-  forgeHammer(): void {
-    this.noise({ dur: 0.3, gain: 0.2, lp: 2600 });
-    this.tone({ freq: 180, to: 70, dur: 0.3, gain: 0.2, type: 'triangle', lp: 900 });
-  }
-  levelUp(): void {
-    [0, 7, 12].forEach((s, i) =>
-      this.tone({ freq: 520 * Math.pow(2, s / 12), dur: 0.3, gain: 0.12, delay: i * 0.08 }),
-    );
-  }
-}
 
-function safeGet(k: string): string | null {
-  try {
-    return localStorage.getItem(k);
-  } catch {
-    return null;
+  draw(): void {
+    this.tone(660, 0.05, 'triangle', 0.05, 880);
   }
-}
-function safeSet(k: string, v: string): void {
-  try {
-    localStorage.setItem(k, v);
-  } catch {
-    /* ignore */
+
+  /** Letters locking into a word — the game's signature sound. */
+  craft(chain: number): void {
+    const base = 300 + Math.min(chain, 6) * 70;
+    this.tone(base, 0.16, 'triangle', 0.12, base * 1.6);
+    window.setTimeout(() => this.tone(base * 1.5, 0.22, 'sine', 0.11, base * 2.4), 90);
+  }
+
+  explosion(): void {
+    this.noise(0.5, 0.3, 900, 0.7);
+    this.tone(120, 0.4, 'sawtooth', 0.14, 40);
+  }
+
+  ignite(): void {
+    this.noise(0.35, 0.16, 1600, 0.5);
+  }
+
+  kill(): void {
+    this.noise(0.14, 0.12, 2400);
+  }
+
+  drop(): void {
+    this.tone(880, 0.1, 'sine', 0.09, 1320);
+  }
+
+  coreHit(): void {
+    this.tone(180, 0.3, 'sawtooth', 0.16, 70);
+    this.noise(0.3, 0.18, 500);
+  }
+
+  wildcard(): void {
+    this.tone(520, 0.12, 'square', 0.1, 1040);
+    window.setTimeout(() => this.tone(780, 0.18, 'sine', 0.1, 1560), 100);
+  }
+
+  cleared(): void {
+    const notes = [523, 659, 784, 1046];
+    notes.forEach((n, i) => window.setTimeout(() => this.tone(n, 0.2, 'triangle', 0.1), i * 90));
+  }
+
+  failed(): void {
+    const notes = [330, 262, 196];
+    notes.forEach((n, i) => window.setTimeout(() => this.tone(n, 0.4, 'sawtooth', 0.12, n * 0.7), i * 160));
+  }
+
+  /** Slow industrial pulse. Deliberately sparse so SFX stay readable. */
+  startMusic(): void {
+    if (this.musicTimer !== null || typeof window === 'undefined') return;
+    const ctx = this.ensure();
+    if (!ctx || !this.musicGain) return;
+    const bass = [55, 55, 73.4, 65.4];
+    this.musicTimer = window.setInterval(() => {
+      const c = this.ensure();
+      if (!c || !this.musicGain) return;
+      const note = bass[this.step % bass.length];
+      this.step += 1;
+      const osc = c.createOscillator();
+      const env = c.createGain();
+      osc.type = 'triangle';
+      osc.frequency.value = note;
+      env.gain.setValueAtTime(0, c.currentTime);
+      env.gain.linearRampToValueAtTime(0.14, c.currentTime + 0.4);
+      env.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 1.9);
+      osc.connect(env).connect(this.musicGain);
+      osc.start();
+      osc.stop(c.currentTime + 2);
+      if (this.step % 4 === 0) {
+        const hat = c.createOscillator();
+        const henv = c.createGain();
+        hat.type = 'square';
+        hat.frequency.value = 3200;
+        henv.gain.setValueAtTime(0.02, c.currentTime + 1);
+        henv.gain.exponentialRampToValueAtTime(0.0005, c.currentTime + 1.06);
+        hat.connect(henv).connect(this.musicGain);
+        hat.start(c.currentTime + 1);
+        hat.stop(c.currentTime + 1.07);
+      }
+    }, 950);
+  }
+
+  stopMusic(): void {
+    if (this.musicTimer !== null) {
+      window.clearInterval(this.musicTimer);
+      this.musicTimer = null;
+    }
   }
 }
 

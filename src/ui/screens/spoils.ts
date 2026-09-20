@@ -1,388 +1,259 @@
-/** After a wave: results, then the choice of what comes next. */
-import { C, F, R, SIZE, T } from '../../theme';
-import { alpha, blob, icon, mix, panel, rr, text, wrapLines, type IconName } from '../../core/draw';
-import { clamp, easeOut } from '../../core/rng';
+/**
+ * Spoils — pick one change for the engine.
+ *
+ * The screen always shows the current build next to the offers, because the
+ * question the player is answering is "what does my engine need?", not "which
+ * card looks best".
+ */
+import { C, R, T, VIEW } from '../../core/theme';
+import { label, plate, rgba, rr, tile, well, type Ctx } from '../../core/draw';
+import { loc, t } from '../../core/i18n';
 import { sfx } from '../../core/audio';
-import { button, chip } from '../kit';
-import { RARE, addLetter, previewWave, rngOf, saveRun, type NodeKind, type RunState } from '../../game/run';
-import type { App, Screen } from '../../app';
+import { store } from '../../core/save';
+import { BLUEPRINTS } from '../../content/blueprints';
+import { RULES } from '../../content/rules';
+import type { App, Screen } from '../../app/app';
+import type { RewardDef } from '../../run/rewards';
 
-interface Choice {
-  kind: NodeKind;
-  name: string;
-  blurb: string;
-  detail: string;
-  icon: IconName;
-  color: string;
-}
-
-const CHOICES: Record<NodeKind, Choice> = {
-  battle: {
-    kind: 'battle',
-    name: 'Front',
-    blurb: 'Push straight into the next assault.',
-    detail: '+10% salvage this wave',
-    icon: 'sword',
-    color: C.ink,
-  },
-  elite: {
-    kind: 'elite',
-    name: 'Elite Front',
-    blurb: 'A heavier, deadlier wave - and a far better prize.',
-    detail: '+60% salvage  ·  +1 rare letter',
-    icon: 'skull',
-    color: C.blood,
-  },
-  market: {
-    kind: 'market',
-    name: 'Market',
-    blurb: 'Trade salvage for letters and permanent upgrades.',
-    detail: 'Spend salvage',
-    icon: 'coin',
-    color: C.gold,
-  },
-  shrine: {
-    kind: 'shrine',
-    name: 'Shrine',
-    blurb: 'Take one lasting blessing.',
-    detail: 'Pick 1 of 3 boons',
-    icon: 'star',
-    color: C.violet,
-  },
-  rest: {
-    kind: 'rest',
-    name: 'Repair Bay',
-    blurb: 'Weld the core back together.',
-    detail: 'Restore 22 core',
-    icon: 'shield',
-    color: C.lime,
-  },
-  supply: {
-    kind: 'supply',
-    name: 'Supply Drop',
-    blurb: 'Extra letters and salvage for the road.',
-    detail: '+3 letters  ·  +20 salvage',
-    icon: 'flask',
-    color: C.cyan,
-  },
-};
+const CARD_W = 300;
+const CARD_H = 330;
 
 export function createSpoilsScreen(): Screen {
-  let offers: Choice[] = [];
-  let t = 0;
-  let app!: App;
+  let hovered = -1;
 
-  const roll = (run: RunState): Choice[] => {
-    const rng = rngOf(run);
-    const pool: NodeKind[] = ['battle', 'battle', 'market', 'shrine', 'rest', 'supply'];
-    if (run.wave >= 3) pool.push('elite');
-    if (run.wave >= 6) pool.push('elite');
-    const kinds = rng.shuffle(pool.slice());
-    const picked: NodeKind[] = [];
-    for (const k of kinds) {
-      if (picked.length >= 3) break;
-      if (picked.includes(k)) continue;
-      picked.push(k);
+  const drawCard = (g: Ctx, app: App, reward: RewardDef, index: number): void => {
+    const x = 200 + index * (CARD_W + 40);
+    const y = 190;
+    const hover = hovered === index;
+    plate(g, x, y, CARD_W, CARD_H, {
+      radius: R.lg,
+      fill: hover ? '#1c2740' : '#151d30',
+      edge: hover ? reward.tone : undefined,
+      depth: 8,
+    });
+    if (hover) {
+      g.strokeStyle = rgba(reward.tone, 0.6);
+      g.lineWidth = 2;
+      rr(g, x - 3, y - 3, CARD_W + 6, CARD_H + 6, R.lg + 3);
+      g.stroke();
     }
-    while (picked.length < 3) picked.push('battle');
-    return picked.map((k) => ({ ...CHOICES[k], detail: CHOICES[k].detail }));
-  };
 
-  const resolve = (kind: NodeKind): void => {
-    const run = app.run;
-    if (!run) return;
-    sfx.ui();
-    switch (kind) {
-      case 'battle':
-        run.salvageBonus += 0.1;
-        app.goto('forge');
-        break;
-      case 'elite': {
-        run.eliteNext = true;
-        const rng = rngOf(run);
-        const picks = rng.sample(RARE, 1);
-        for (const ch of picks) addLetter(run, ch);
-        saveRun(run);
-        app.toast(`Elite front  ·  gained ${picks.join(' ').toUpperCase()}`, C.blood);
-        app.goto('forge');
-        break;
+    // Category chip
+    const kindLabel =
+      reward.kind === 'rule' || reward.kind === 'tweak'
+        ? t('rewardRule')
+        : reward.kind === 'blueprint'
+          ? t('rewardBlueprint')
+          : reward.kind === 'repair'
+            ? t('core')
+            : t('rewardBag');
+    g.fillStyle = rgba(reward.tone, 0.18);
+    rr(g, x + 20, y + 18, 132, 26, 13);
+    g.fill();
+    label(g, kindLabel, x + 32, y + 36, { size: T.micro, color: reward.tone, weight: 800, tracking: 1.4 });
+
+    // Visual: bag rewards show tiles, blueprint rewards show the word, rules show a mark
+    if (reward.kind === 'bagAdd' || reward.kind === 'bagDuplicate') {
+      tile(g, x + CARD_W / 2 - 33, y + 68, 66, reward.letter, 'filled', { glow: reward.tone });
+      if (reward.kind === 'bagDuplicate') {
+        tile(g, x + CARD_W / 2 + 6, y + 88, 50, reward.letter, 'filled', { alpha: 0.85 });
       }
-      case 'market':
-        app.goto('market');
-        break;
-      case 'shrine':
-        app.goto('shrine');
-        break;
-      case 'rest':
-        run.core = Math.min(run.maxCore, run.core + 22);
-        saveRun(run);
-        app.toast('Core repaired +22', C.good);
-        app.goto('forge');
-        break;
-      case 'supply': {
-        const rng = rngOf(run);
-        const letters = rng.sample(
-          ['e', 'a', 's', 't', 'r', 'n', 'l', 'o', 'i', 'c', 'd', 'm', 'p', 'h', 'g', 'y', 'w', 'v', 'k'],
-          3,
-        );
-        for (const ch of letters) addLetter(run, ch);
-        run.salvage += 20;
-        saveRun(run);
-        app.toast(`Supply: +${letters.join(' ').toUpperCase()} and 20 salvage`, C.cyan);
-        app.goto('forge');
-        break;
-      }
+    } else if (reward.kind === 'bagRemove') {
+      tile(g, x + CARD_W / 2 - 33, y + 68, 66, reward.letter, 'slot');
+      g.strokeStyle = C.bad;
+      g.lineWidth = 4;
+      g.beginPath();
+      g.moveTo(x + CARD_W / 2 - 44, y + 76);
+      g.lineTo(x + CARD_W / 2 + 44, y + 148);
+      g.stroke();
+    } else if (reward.kind === 'blueprint') {
+      reward.blueprint.recipe.forEach((letter, i) => {
+        const n = reward.blueprint.recipe.length;
+        const size = 44;
+        const totalW = n * size + (n - 1) * 6;
+        tile(g, x + CARD_W / 2 - totalW / 2 + i * (size + 6), y + 74, size, letter, 'filled', {
+          glow: reward.tone,
+        });
+      });
+    } else if (reward.kind === 'repair') {
+      // A wrench-crossed core reads instantly as "this fixes the machine".
+      g.fillStyle = rgba(reward.tone, 0.18);
+      g.beginPath();
+      g.arc(x + CARD_W / 2, y + 110, 44, 0, Math.PI * 2);
+      g.fill();
+      g.strokeStyle = reward.tone;
+      g.lineWidth = 5;
+      g.beginPath();
+      g.arc(x + CARD_W / 2, y + 110, 44, 0, Math.PI * 2);
+      g.stroke();
+      label(g, '+', x + CARD_W / 2, y + 130, {
+        align: 'center',
+        size: 52,
+        color: reward.tone,
+        weight: 800,
+      });
+    } else {
+      const icon = reward.kind === 'rule' ? '⚙' : '✦';
+      label(g, icon, x + CARD_W / 2, y + 110, { align: 'center', size: 56, color: reward.tone, weight: 800 });
     }
+
+    // Text
+    label(g, loc(reward.title), x + 20, y + 196, { size: T.lead, color: C.ink, weight: 800 });
+    g.font = `500 ${T.small}px Archivo, sans-serif`;
+    const words = loc(reward.desc).split(' ');
+    const lines: string[] = [];
+    let line = '';
+    for (const w of words) {
+      const test = line ? `${line} ${w}` : w;
+      if (g.measureText(test).width > CARD_W - 40 && line) {
+        lines.push(line);
+        line = w;
+      } else line = test;
+    }
+    if (line) lines.push(line);
+    lines.slice(0, 4).forEach((l, i) => {
+      label(g, l, x + 20, y + 226 + i * 20, { size: T.small, color: C.dim, weight: 500 });
+    });
+
+    app.ui.button(g, `spoils.take.${index}`, { x: x + 20, y: y + CARD_H - 62, w: CARD_W - 40, h: 46 }, {
+      label: t('take'),
+      tone: reward.tone,
+      fontSize: T.body,
+    });
   };
 
   return {
     id: 'spoils',
-    enter(a) {
-      app = a;
-      t = 0;
-      const run = a.run;
-      if (run) offers = roll(run).slice(0, 3);
+    enter() {
+      hovered = -1;
     },
-    update(dt) {
-      t += dt;
+    draw(g, app) {
+      const run = app.run;
+      if (!run) {
+        app.goto('title');
+        return;
+      }
+      g.fillStyle = '#080c16';
+      g.fillRect(0, 0, VIEW.w, VIEW.h);
+      const grad = g.createLinearGradient(0, 0, 0, VIEW.h);
+      grad.addColorStop(0, rgba(C.violet, 0.07));
+      grad.addColorStop(0.5, 'rgba(0,0,0,0)');
+      g.fillStyle = grad;
+      g.fillRect(0, 0, VIEW.w, VIEW.h);
+
+      label(g, t('spoils'), 200, 92, { size: T.title, color: C.ink, weight: 800, tracking: 3 });
+      label(g, t('chooseOne'), 200, 128, { size: T.lead, color: C.gold, weight: 700, tracking: 2 });
+      label(
+        g,
+        `Trận ${Math.min(run.state.encounterIndex + 1, 7)}/8 · ${loc(run.encounter().name)} — ${t('encounterClear')}`,
+        200,
+        158,
+        { size: T.small, color: C.dim, weight: 500 },
+      );
+
+      // Build summary so the choice has context.
+      const bx = 200;
+      const by = 560;
+      well(g, bx - 20, by - 30, VIEW.w - 360, 190, R.lg);
+      label(g, 'DÂY CHUYỀN HIỆN TẠI', bx, by - 6, {
+        size: T.micro,
+        color: C.faint,
+        weight: 800,
+        tracking: 2.4,
+      });
+
+      // Bag
+      const counts = new Map<string, number>();
+      for (const ch of run.state.bag) counts.set(ch, (counts.get(ch) ?? 0) + 1);
+      const rows = [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+      rows.slice(0, 14).forEach(([letter, count], i) => {
+        const x = bx + i * 34;
+        tile(g, x, by + 16, 30, letter, 'filled');
+        if (count > 1) {
+          label(g, `${count}`, x + 27, by + 42, { size: 10, color: C.gold, align: 'right', weight: 800 });
+        }
+      });
+
+      // Blueprints
+      label(g, 'CÔNG THỨC', bx, by + 96, {
+        size: T.micro,
+        color: C.faint,
+        weight: 800,
+        tracking: 2.4,
+      });
+      run.state.blueprints.forEach((id, i) => {
+        if (!id) return;
+        const bp = BLUEPRINTS[id];
+        const x = bx + 110 + i * 150;
+        label(g, bp.word, x, by + 96, { size: T.small, color: bp.color, weight: 800, tracking: 1.4 });
+        label(g, loc(bp.name), x + 62, by + 96, { size: 11, color: C.faint, weight: 600 });
+      });
+
+      // Rules
+      label(g, 'LUẬT MÁY', bx + 640, by + 96, {
+        size: T.micro,
+        color: C.faint,
+        weight: 800,
+        tracking: 2.4,
+      });
+      const ruleNames = run.state.ruleIds
+        .map((id) => RULES.find((r) => r.id === id))
+        .filter(Boolean)
+        .map((r) => loc(r!.name));
+      const flags = run.state.flags.map((f) => f);
+      const all = [...ruleNames, ...flags];
+      label(g, all.length ? all.join(' · ') : '—', bx + 640, by + 118, {
+        size: 11,
+        color: C.violet,
+        weight: 600,
+      });
+
+      run.pendingRewards.forEach((reward, i) => {
+        const rect = { x: 200 + i * (CARD_W + 40), y: 190, w: CARD_W, h: CARD_H };
+        const hit = app.ui.hit(`spoils.hover.${i}`, rect, {});
+        if (hit.hover) hovered = i;
+        drawCard(g, app, reward, i);
+      });
+
+      if (run.pendingRewards.length === 0) {
+        label(g, 'Không có lựa chọn nào — tiếp tục.', VIEW.w / 2, 300, {
+          align: 'center',
+          size: T.lead,
+          color: C.dim,
+          weight: 600,
+        });
+        app.ui.button(g, 'spoils.skip', { x: VIEW.w / 2 - 110, y: 340, w: 220, h: 52 }, {
+          label: t('skip'),
+          tone: C.cyan,
+        });
+      }
     },
-    click(id) {
-      if (id.startsWith('node-btn:')) resolve(id.slice(9) as NodeKind);
-      else if (id.startsWith('node:')) resolve(id.slice(5) as NodeKind);
-    },
-    key(e) {
-      if (e.key === '1' && offers[0]) resolve(offers[0].kind);
-      if (e.key === '2' && offers[1]) resolve(offers[1].kind);
-      if (e.key === '3' && offers[2]) resolve(offers[2].kind);
-      return false;
-    },
-    draw(g, a) {
-      app = a;
+    click(id, app) {
       const run = app.run;
       if (!run) return;
-      const last = run.history[run.history.length - 1];
-      const wave = previewWave(run);
-
-      g.fillStyle = '#080a12';
-      g.fillRect(0, 0, SIZE.w, SIZE.h);
-      blob(g, 240, 140, 540, C.gold, 0.07);
-      blob(g, SIZE.w - 200, SIZE.h - 160, 480, C.violet, 0.06);
-
-      const p = easeOut(clamp(t / 0.5, 0, 1));
-
-      // title
-      g.save();
-      g.globalAlpha = p;
-      text(g, `WAVE ${last ? last.wave : run.wave - 1} CLEARED`, 60, 76, {
-        size: 40,
-        weight: 700,
-        color: C.ink,
-        font: F.ui,
-        baseline: 'middle',
-        track: 3,
-      });
-      text(
-        g,
-        run.victory ? 'THE ENGINE HOLDS - RUN COMPLETE' : 'Choose what the next push looks like',
-        62,
-        112,
-        {
-          size: T.small,
-          weight: 500,
-          color: run.victory ? C.gold : C.dim,
-          font: F.ui,
-          baseline: 'middle',
-          track: 0.4,
-        },
-      );
-      g.restore();
-
-      // results strip
-      const sx = 60;
-      const sy = 150;
-      const results: [string, string, string, IconName][] = [
-        ['Core left', `${Math.max(0, Math.round(run.core))}`, run.core / run.maxCore < 0.4 ? C.bad : C.good, 'heart'],
-        ['Killed', `${last?.killed ?? 0}`, C.ink, 'skull'],
-        ['Best cascade', `x${last?.cascade ?? 0}`, C.violet, 'bolt'],
-        ['Salvage', `${run.salvage}`, C.gold, 'coin'],
-        ['Rocked up', `${run.placed.length} weapons`, C.cyan, 'anvil'],
-      ];
-      let rx = sx;
-      for (const [label, value, color, ic] of results) {
-        const w = 172;
-        panel(g, rx, sy, w, 74, { fill: C.bg1, stroke: alpha(C.line, 0.8), r: R.md });
-        icon(g, ic, rx + 24, sy + 26, 18, color, true);
-        text(g, label.toUpperCase(), rx + 42, sy + 26, {
-          size: T.micro,
-          weight: 700,
-          color: C.faint,
-          font: F.num,
-          baseline: 'middle',
-          track: 1.1,
-        });
-        text(g, value, rx + 18, sy + 52, {
-          size: T.lead,
-          weight: 700,
-          color,
-          font: F.num,
-          baseline: 'middle',
-          track: 0.6,
-        });
-        rx += w + 12;
+      if (id === 'spoils.skip') {
+        run.advance();
+        store.saveRun(run.serialize());
+        app.goto('battle');
+        return;
       }
-
-      // node cards
-      text(g, 'CHOOSE YOUR PATH', sx, 268, {
-        size: T.tiny,
-        weight: 700,
-        color: C.faint,
-        font: F.num,
-        baseline: 'middle',
-        track: 3.2,
-      });
-
-      const cw = 420;
-      const chh = 300;
-      const gap = 24;
-      const totalW = cw * 3 + gap * 2;
-      const cx0 = (SIZE.w - totalW) / 2;
-      offers.forEach((choice, i) => {
-        const x = cx0 + i * (cw + gap);
-        const y = 300;
-        const id = `node:${choice.kind}`;
-        const hv = app.kit.hoverAmt(id);
-        g.save();
-        g.globalAlpha = clamp((t - 0.15 - i * 0.08) / 0.4, 0, 1);
-        panel(g, x, y, cw, chh, {
-          fill: mix(C.bg1, choice.color, 0.04 + hv * 0.05),
-          stroke: alpha(choice.color, 0.3 + hv * 0.5),
-          r: R.lg,
-          shadow: hv * 24,
-          shadowColor: alpha(choice.color, 0.35),
-          top: alpha(choice.color, 0.07),
-        });
-        app.kit.hot({ id, x, y, w: cw, h: chh });
-
-        // icon plaque
-        rr(g, x + 24, y + 24, 56, 56, R.md);
-        g.fillStyle = alpha(choice.color, 0.14);
-        g.fill();
-        icon(g, choice.icon, x + 52, y + 52, 26, choice.color, true);
-
-        text(g, choice.name.toUpperCase(), x + 96, y + 52, {
-          size: T.head,
-          weight: 700,
-          color: C.ink,
-          font: F.ui,
-          baseline: 'middle',
-          track: 2,
-        });
-
-        const blurbLines = wrapLines(g, choice.blurb, cw - 48, { size: T.body, weight: 500, font: F.ui });
-        blurbLines.slice(0, 2).forEach((line, li) => {
-          text(g, line, x + 24, y + 116 + li * 22, {
-            size: T.body,
-            weight: 500,
-            color: C.dim,
-            font: F.ui,
-            baseline: 'middle',
-          });
-        });
-
-        chip(g, { x: x + 24, y: y + 170, label: choice.detail, color: choice.color, size: T.tiny });
-
-        // preview of the consequence
-        if (choice.kind === 'battle' || choice.kind === 'elite') {
-          const mul = choice.kind === 'elite' ? 1.6 : 1.1;
-          text(
-            g,
-            `NEXT WAVE: ${wave.count} enemies  ·  ${Math.round(wave.reward * mul)} salvage`,
-            x + 24,
-            y + 220,
-            { size: T.tiny, weight: 700, color: C.faint, font: F.num, baseline: 'middle', track: 0.6 },
-          );
-        } else if (choice.kind === 'rest') {
-          text(g, `CORE BECOMES ${Math.min(run.maxCore, Math.round(run.core) + 22)}  (+22)`, x + 24, y + 220, {
-            size: T.tiny,
-            weight: 700,
-            color: C.lime,
-            font: F.num,
-            baseline: 'middle',
-            track: 0.6,
-          });
-        } else if (choice.kind === 'supply') {
-          text(g, `RACK GROWS TO ${run.rack.length + 3} LETTERS`, x + 24, y + 220, {
-            size: T.tiny,
-            weight: 700,
-            color: C.cyan,
-            font: F.num,
-            baseline: 'middle',
-            track: 0.6,
-          });
-        } else if (choice.kind === 'market') {
-          text(g, `SALVAGE AVAILABLE: ${run.salvage}`, x + 24, y + 220, {
-            size: T.tiny,
-            weight: 700,
-            color: C.gold,
-            font: F.num,
-            baseline: 'middle',
-            track: 0.6,
-          });
-        }
-
-        button(g, app.kit, {
-          id: `node-btn:${choice.kind}`,
-          x: x + 24,
-          y: y + chh - 64,
-          w: cw - 48,
-          h: 44,
-          label: i === 0 ? 'TAKE THIS PATH' : 'TAKE',
-          tone: i === 0 ? 'primary' : 'secondary',
-          size: T.small,
-          glow: i === 0,
-        });
-        g.restore();
-      });
-
-      // history rail
-      const hy = SIZE.h - 74;
-      text(g, 'RUN SO FAR', 60, hy - 22, {
-        size: T.micro,
-        weight: 700,
-        color: C.faint,
-        font: F.num,
-        baseline: 'middle',
-        track: 2,
-      });
-      const recent = run.history.slice(-9);
-      let hx = 60;
-      for (const h of recent) {
-        const w = 132;
-        panel(g, hx, hy, w, 44, { fill: 'rgba(255,255,255,0.02)', stroke: alpha(C.line, 0.7), r: R.sm });
-        text(g, `W${h.wave}`, hx + 12, hy + 15, {
-          size: T.micro + 1,
-          weight: 700,
-          color: C.faint,
-          font: F.num,
-          baseline: 'middle',
-        });
-        text(g, `x${h.cascade}`, hx + w - 12, hy + 15, {
-          size: T.micro + 1,
-          weight: 700,
-          color: C.violet,
-          font: F.num,
-          align: 'right',
-          baseline: 'middle',
-        });
-        text(g, `${h.killed} kills  ·  core ${h.core}`, hx + 12, hy + 31, {
-          size: T.micro,
-          weight: 500,
-          color: C.dim,
-          font: F.ui,
-          baseline: 'middle',
-        });
-        hx += w + 8;
+      if (id.startsWith('spoils.take.')) {
+        const index = Number(id.split('.')[2]);
+        const reward = run.pendingRewards[index];
+        if (!reward) return;
+        sfx.ui();
+        run.applyReward(reward);
+        run.advance();
+        store.saveRun(run.serialize());
+        app.goto('battle');
       }
+    },
+    key(e, app) {
+      if (e.key === '1' || e.key === '2' || e.key === '3') {
+        this.click?.(`spoils.take.${Number(e.key) - 1}`, app);
+        return true;
+      }
+      return false;
     },
   };
 }

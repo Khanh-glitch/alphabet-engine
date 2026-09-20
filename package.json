@@ -6,7 +6,9 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "shot": "node tools/shoot.mjs shot",
+    "sim": "node tools/shoot.mjs sim"
   },
   "repository": {
     "type": "git",
@@ -17,6 +19,8 @@
   },
   "homepage": "https://github.com/Khanh-glitch/alphabet-engine#readme",
   "devDependencies": {
+    "@napi-rs/canvas": "^1.0.9",
+    "esbuild": "^0.28.2",
     "typescript": "^7.0.2",
     "vite": "^8.3.0"
   },

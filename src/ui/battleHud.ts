@@ -1,0 +1,590 @@
+/**
+ * Battle HUD.
+ *
+ * Information hierarchy is fixed by the design brief:
+ *   1. equipped blueprint progress
+ *   2. current shared letter pool
+ *   3. wildcard availability
+ *   4. letters still coming in on carriers
+ *   5. core health / threat
+ *   6. cascade chain depth
+ * Nothing else is allowed on screen during a fight.
+ *
+ * The HUD also owns the word-completion beat, because that transformation has to
+ * happen on the blueprint card the player's eye is already on.
+ */
+import { C, DECK, R, T, W, BP_COLOR } from '../core/theme';
+import { clamp, easeOut } from '../core/rng';
+import { glow, label, measure, plate, rgba, rr, tile, well, type Ctx, type Rect } from '../core/draw';
+import { loc } from '../core/i18n';
+import { H } from '../core/strings';
+import type { Battle } from '../battle/battle';
+import type { BlueprintDef } from '../alphabet/types';
+import type { Ui } from '../core/ui';
+
+// ---- layout (all logical px) ---------------------------------------------
+
+export const CARD = { x: 24, y: 622, w: 300, h: 100, gap: 16 };
+export const cardRect = (slot: number): Rect => ({
+  x: CARD.x + slot * (CARD.w + CARD.gap),
+  y: CARD.y,
+  w: CARD.w,
+  h: CARD.h,
+});
+
+export const INCOMING: Rect = { x: 984, y: CARD.y, w: 432, h: CARD.h };
+export const BAGBOX: Rect = { x: 24, y: 730, w: 250, h: 70 };
+export const TRAY: Rect = { x: 286, y: 730, w: 834, h: 70 };
+export const WILD_RECT: Rect = { x: 1132, y: 730, w: 284, h: 70 };
+
+const STRIP: Rect = { x: 60, y: 14, w: 580, h: 68 };
+const CHAIN_BOX: Rect = { x: 656, y: 14, w: 112, h: 68 };
+const CONTROLS: Rect = { x: 784, y: 26, w: 196, h: 44 };
+const HINT: Rect = { x: 60, y: 92, w: 580, h: 38 };
+
+/**
+ * A recipe position is either covered by the pool or missing. Walking the word
+ * left to right marks the earliest positions the pool cannot pay for, so "B O M
+ * B" with one B in the pool reads as "⚬ O M B" — no counting required.
+ */
+function recipeStates(bp: BlueprintDef, have: Map<string, number>): boolean[] {
+  const pool = new Map(have);
+  return bp.recipe.map((letter) => {
+    const n = pool.get(letter) ?? 0;
+    if (n > 0) {
+      pool.set(letter, n - 1);
+      return true;
+    }
+    return false;
+  });
+}
+
+function blueprintCard(
+  g: Ctx,
+  battle: Battle,
+  bp: BlueprintDef | null,
+  slot: number,
+  time: number,
+  opts: HudInteraction,
+): void {
+  const r = cardRect(slot);
+  const hovered = opts.hoveredSlot === slot;
+  const eligible = opts.eligible.includes(slot);
+  const armed = opts.wildcardMode;
+
+  if (!bp) {
+    plate(g, r.x, r.y, r.w, r.h, { radius: R.md, fill: '#101728', depth: 5 });
+    label(g, H.emptySlot, r.x + r.w / 2, r.y + r.h / 2, {
+      align: 'center',
+      baseline: 'middle',
+      size: T.tiny,
+      color: C.faint,
+      weight: 700,
+      tracking: 2,
+    });
+    return;
+  }
+
+  const tone = BP_COLOR[bp.id] ?? C.cyan;
+  const have = battle.pool.notes();
+  const covered = recipeStates(bp, have);
+  const missingCount = covered.filter((c) => !c).length;
+  const crafts = battle.telemetry.data.craftsByBlueprint[bp.id] ?? 0;
+  const almost = missingCount === 1;
+
+  plate(g, r.x, r.y, r.w, r.h, {
+    radius: R.md,
+    fill: hovered || (armed && eligible) ? '#1e2a46' : '#151d30',
+    edge: armed && eligible ? C.gold : almost ? rgba(tone, 0.85) : undefined,
+    depth: 5,
+  });
+
+  // Progress wash — the card brightens as its recipe fills up.
+  const filled = (bp.recipe.length - missingCount) / bp.recipe.length;
+  if (filled > 0) {
+    g.save();
+    rr(g, r.x, r.y, r.w, r.h, R.md);
+    g.clip();
+    const grad = g.createLinearGradient(r.x, r.y, r.x, r.y + r.h);
+    grad.addColorStop(0, rgba(tone, 0.06 + filled * 0.14));
+    grad.addColorStop(1, rgba(tone, 0.02 + filled * 0.06));
+    g.fillStyle = grad;
+    g.fillRect(r.x, r.y, r.w, r.h);
+    g.restore();
+  }
+
+  // Recipe tiles, in spelling order, plus the word they spell.
+  const gap = 5;
+  const avail = r.w - 32;
+  const size = Math.min(52, (avail - (bp.recipe.length - 1) * gap) / bp.recipe.length);
+  const totalW = bp.recipe.length * size + (bp.recipe.length - 1) * gap;
+  const startX = r.x + (r.w - totalW) / 2;
+  const ty = r.y + 12;
+
+  covered.forEach((isFilled, i) => {
+    const x = startX + i * (size + gap);
+    if (isFilled) {
+      tile(g, x, ty, size, bp.recipe[i], 'filled');
+    } else if (armed && eligible) {
+      tile(g, x, ty, size, null, 'missing');
+    } else {
+      tile(g, x, ty, size, null, 'slot');
+    }
+  });
+
+  // Word + behaviour, so the player never has to remember what BBOM was.
+  label(g, bp.word, r.x + 16, r.y + r.h - 12, {
+    size: T.body,
+    color: C.ink,
+    weight: 800,
+    tracking: 2,
+  });
+  label(g, loc(bp.name), r.x + 16 + g.measureText(bp.word).width + 42, r.y + r.h - 12, {
+    size: T.small,
+    color: tone,
+    weight: 700,
+  });
+  if (crafts > 0) {
+    label(g, `×${crafts}`, r.x + r.w - 16, r.y + r.h - 12, {
+      size: T.small,
+      color: C.dim,
+      align: 'right',
+      weight: 800,
+    });
+  }
+  // What the pool still owes this recipe, spelled out — but only when the word
+  // has not crafted yet, so it never collides with the craft counter.
+  const owedCounts = new Map<string, number>();
+  bp.recipe.forEach((letter, i) => {
+    if (!covered[i]) owedCounts.set(letter, (owedCounts.get(letter) ?? 0) + 1);
+  });
+  const owed = [...owedCounts.entries()].map(([letter, n]) => (n > 1 ? `${letter}×${n}` : letter));
+  const nameEnd = 16 + measure(g, bp.word, { size: T.body, weight: 800, tracking: 2 }) + 42 +
+    measure(g, loc(bp.name), { size: T.small, weight: 700 });
+  const needText = owed.length > 0 ? `${H.needs} ${owed.join(' ')}` : null;
+  const needW = needText ? measure(g, needText, { size: T.small, weight: 800 }) : 0;
+  if (needText && (crafts === 0 || r.x + r.w - 16 - needW > nameEnd + 10)) {
+    label(g, needText, r.x + r.w - 16, r.y + r.h - 12, {
+      size: T.small,
+      color: rgba(C.gold, 0.95),
+      align: 'right',
+      weight: 800,
+    });
+  }
+
+  // Actionable wildcard: only the missing tile is highlighted, nothing modal.
+  if (armed && eligible) {
+    const pulse = 0.5 + Math.sin(time * 6) * 0.5;
+    g.strokeStyle = rgba(C.gold, 0.5 + pulse * 0.5);
+    g.lineWidth = W.bold;
+    rr(g, r.x - 3, r.y - 3, r.w + 6, r.h + 6, R.md + 3);
+    g.stroke();
+  }
+
+  // ---- the word-completion beat ------------------------------------------
+  const craft = battle.pending.find((p) => p.slot === slot);
+  if (!craft) return;
+  const beat =
+    craft.phase === 0 ? craft.t / 0.36 : craft.phase === 1 ? craft.t / 0.2 : craft.t / 0.26;
+
+  if (craft.phase === 0) {
+    // Letters converge from the tray onto this card: the game's hero moment.
+    const trayCx = TRAY.x + TRAY.w / 2;
+    const trayCy = TRAY.y + TRAY.h / 2;
+    craft.letters.forEach((letter, i) => {
+      const e = clamp(easeOut(clamp(beat + (craft.letters.length - 1 - i) * 0.07, 0, 1)), 0, 1);
+      const tx = startX + i * (size + gap);
+      const x = trayCx + (tx - trayCx) * e;
+      const y = trayCy + (ty - trayCy) * e - Math.sin(e * Math.PI) * 46;
+      tile(g, x, y, size * (1 - e * 0.08), letter, 'filled', { alpha: 0.35 + e * 0.65 });
+    });
+  } else if (craft.phase === 1) {
+    // Lock: the word squeezes together into one solid block.
+    const squeeze = 1 - beat * 0.3;
+    g.save();
+    g.translate(r.x + r.w / 2, ty + size / 2);
+    g.scale(squeeze, 1 / squeeze);
+    g.translate(-(r.x + r.w / 2), -(ty + size / 2));
+    bp.recipe.forEach((letter, i) => {
+      tile(g, startX + i * (size + gap), ty, size, letter, 'lock', { press: 1, glow: C.gold });
+    });
+    g.restore();
+    glow(g, r.x + r.w / 2, ty + size / 2, 200 * beat, C.gold, 0.22);
+  } else {
+    // Emerge: the object leaves the card for the battlefield.
+    const a = 1 - beat;
+    g.strokeStyle = rgba(C.gold, a * 0.9);
+    g.lineWidth = 5 * a + 1;
+    g.beginPath();
+    g.moveTo(r.x + r.w / 2, r.y);
+    g.quadraticCurveTo(r.x + r.w / 2 + 80, r.y - 160, r.x + r.w / 2 + 320, 470);
+    g.stroke();
+  }
+}
+
+/** Letter pool tray — the shared alphabet economy. */
+function poolTray(g: Ctx, battle: Battle, time: number): void {
+  well(g, TRAY.x, TRAY.y, TRAY.w, TRAY.h, R.md);
+  // Label lives inside the well, in its own column, so tiles never touch text.
+  label(g, H.pool, TRAY.x + 16, TRAY.y + TRAY.h / 2 + 4, {
+    size: T.micro,
+    color: C.faint,
+    weight: 800,
+    tracking: 2,
+  });
+  const trayInner = { x: TRAY.x + 96, w: TRAY.w - 96 - 12 };
+
+  const rows = battle.pool.tray();
+  const size = 42;
+  const gap = 7;
+  // Reserve room for the overflow chip whenever the tray would run over.
+  const fullFit = Math.floor((trayInner.w + gap) / (size + gap));
+  const needsOverflow = rows.length > fullFit;
+  const maxFit = needsOverflow ? Math.max(1, fullFit - 1) : fullFit;
+  const shown = rows.slice(0, maxFit);
+  const overflow = rows.length - shown.length;
+  const y = TRAY.y + (TRAY.h - size) / 2 - 4;
+
+  shown.forEach((row, i) => {
+    const x = trayInner.x + i * (size + gap);
+    const entry = battle.pool.all().find((e) => e.uid === row.uid);
+    const age = entry ? time - entry.t : 9;
+    const pop = age < 0.3 ? 1 + (0.3 - age) * 1.3 : 1;
+    tile(g, x, y, size, row.letter, 'filled', { scale: pop, press: 0 });
+    if (row.count > 1) {
+      label(g, `×${row.count}`, x + size / 2, y + size - 7, {
+        size: 12,
+        color: C.gold,
+        align: 'center',
+        weight: 800,
+      });
+    }
+  });
+
+  if (overflow > 0) {
+    label(g, `+${overflow}`, TRAY.x + TRAY.w - 14, TRAY.y + TRAY.h / 2 + 5, {
+      size: T.small,
+      color: C.dim,
+      align: 'right',
+      weight: 700,
+    });
+  }
+  if (rows.length === 0) {
+    label(g, H.poolEmpty, TRAY.x + 96 + trayInner.w / 2, TRAY.y + TRAY.h / 2 + 5, {
+      size: T.small,
+      color: C.faint,
+      align: 'center',
+      weight: 600,
+    });
+  }
+}
+
+/** Bag readout: the player's raw economy and how much of the cycle is left. */
+function bagBox(g: Ctx, battle: Battle): void {
+  well(g, BAGBOX.x, BAGBOX.y, BAGBOX.w, BAGBOX.h, R.md);
+  label(g, H.bag, BAGBOX.x + 14, BAGBOX.y + 20, {
+    size: T.micro,
+    color: C.faint,
+    weight: 800,
+    tracking: 2,
+  });
+  const remain = battle.bag.remaining;
+  const total = Math.max(1, battle.bag.size);
+  label(g, `${H.cycle} ${battle.bag.cycleIndex + 1}`, BAGBOX.x + 14, BAGBOX.y + 40, {
+    size: T.tiny,
+    color: C.dim,
+    weight: 700,
+  });
+  label(g, `${remain}/${total}`, BAGBOX.x + BAGBOX.w - 14, BAGBOX.y + 40, {
+    size: T.small,
+    color: C.ink,
+    align: 'right',
+    weight: 800,
+  });
+  const trackX = BAGBOX.x + 14;
+  const trackW = BAGBOX.w - 28;
+  g.fillStyle = rgba('#000000', 0.45);
+  rr(g, trackX, BAGBOX.y + 50, trackW, 12, 6);
+  g.fill();
+  g.fillStyle = C.cyan;
+  rr(g, trackX, BAGBOX.y + 50, Math.max(6, trackW * (remain / total)), 12, 6);
+  g.fill();
+}
+
+/** Wildcard: charges, and exactly what it would do right now. */
+function wildcard(g: Ctx, ui: Ui, battle: Battle, time: number, inter: HudInteraction): void {
+  const left = battle.wildcardsLeft;
+  const armed = inter.wildcardMode;
+  const usable = left > 0 && battle.targets.length > 0;
+  const pulse = 0.5 + Math.sin(time * 5) * 0.5;
+  const hover = ui.hit('hud.wild', WILD_RECT, {
+    disabled: left <= 0,
+    tooltip: `${H.wildcard} — ${H.wildcardHint}`,
+  });
+
+  if (usable) {
+    glow(g, WILD_RECT.x + 52, WILD_RECT.y + WILD_RECT.h / 2, 64 + pulse * 8, C.violet, 0.26);
+  }
+  plate(g, WILD_RECT.x, WILD_RECT.y, WILD_RECT.w, WILD_RECT.h, {
+    radius: R.md,
+    fill: armed ? '#2b2050' : '#1a2136',
+    edge: usable ? C.violet : undefined,
+    depth: 5,
+    alpha: left > 0 ? 1 : 0.5,
+  });
+  tile(g, WILD_RECT.x + 12, WILD_RECT.y + 12, 46, '?', usable ? 'wild' : 'slot', {
+    glow: usable ? C.violet : undefined,
+  });
+
+  const tx = WILD_RECT.x + 68;
+  label(g, `${left}`, WILD_RECT.x + WILD_RECT.w - 14, WILD_RECT.y + 32, {
+    size: T.head,
+    color: left > 0 ? C.ink : C.faint,
+    align: 'right',
+    weight: 800,
+  });
+  const detail =
+    left <= 0
+      ? H.wildSpent
+      : battle.targets.length > 0
+        ? `${battle.targets[0].blueprint.word} ${H.needLetter}${battle.targets[0].missing}`
+        : H.wildWaiting;
+  label(g, detail, tx, WILD_RECT.y + 30, {
+    size: T.small,
+    color: left > 0 ? C.ink : C.faint,
+    weight: 800,
+  });
+  label(g, H.wildReady, tx, WILD_RECT.y + 52, {
+    size: T.micro,
+    color: left > 0 && battle.targets.length > 0 ? C.violet : C.faint,
+    weight: 700,
+  });
+
+  if (hover.hover && left > 0) {
+    g.strokeStyle = rgba('#ffffff', 0.35);
+    g.lineWidth = W.hair;
+    rr(g, WILD_RECT.x - 3, WILD_RECT.y - 3, WILD_RECT.w + 6, WILD_RECT.h + 6, R.md + 3);
+    g.stroke();
+  }
+}
+
+/** Incoming letters: what is still promised, and how many carriers are unknown. */
+function incomingPanel(g: Ctx, battle: Battle): void {
+  plate(g, INCOMING.x, INCOMING.y, INCOMING.w, INCOMING.h, {
+    radius: R.md,
+    fill: '#131b2e',
+    edge: C.lineHi,
+    depth: 5,
+  });
+  label(g, H.incomingLetters, INCOMING.x + 16, INCOMING.y + 22, {
+    size: T.micro,
+    color: C.faint,
+    weight: 800,
+    tracking: 2,
+  });
+
+  const known = battle.cfg.encounter.guaranteed;
+  const size = 40;
+  const gap = 6;
+  const maxShown = Math.floor((INCOMING.w - 150) / (size + gap));
+  const shown = known.slice(0, maxShown);
+  const y = INCOMING.y + INCOMING.h - size - 12;
+  shown.forEach((letter, i) => {
+    tile(g, INCOMING.x + 16 + i * (size + gap), y, size, letter, 'filled');
+  });
+  if (known.length === 0) {
+    label(g, H.incomingNone, INCOMING.x + 16, y + 28, {
+      size: T.small,
+      color: C.faint,
+      weight: 600,
+    });
+  }
+  const unknown = battle.cfg.encounter.unknownCarriers;
+  if (unknown > 0) {
+    label(g, `${unknown} ${H.incomingUnknown}`, INCOMING.x + INCOMING.w - 16, INCOMING.y + INCOMING.h - 22, {
+      size: T.small,
+      color: C.gold,
+      align: 'right',
+      weight: 700,
+    });
+  }
+}
+
+/** Top-left: which encounter this is and how much of it is left. */
+function encounterStrip(g: Ctx, battle: Battle, waveIndex: number, waveTotal: number): void {
+  plate(g, STRIP.x, STRIP.y, STRIP.w, STRIP.h, {
+    radius: R.md,
+    fill: '#121a2c',
+    edge: C.lineHi,
+    depth: 5,
+  });
+  const enc = battle.cfg.encounter;
+  const kindColor = enc.kind === 'boss' ? C.bad : enc.kind === 'elite' ? C.gold : C.cyan;
+  const kindText = H.kindLabel[enc.kind];
+  const nameW = measure(g, loc(enc.name), { size: T.lead, weight: 800 });
+  const kindW = measure(g, kindText, { size: T.micro, weight: 800 }) + 24;
+  const chipX = STRIP.x + 18 + nameW + 14;
+  g.fillStyle = rgba(kindColor, 0.16);
+  rr(g, chipX, STRIP.y + 12, kindW, 24, 12);
+  g.fill();
+  label(g, kindText, chipX + 12, STRIP.y + 29, { size: T.micro, color: kindColor, weight: 800 });
+  label(g, loc(enc.name), STRIP.x + 18, STRIP.y + 30, { size: T.lead, color: C.ink, weight: 800 });
+  label(g, `${H.wave} ${waveIndex}/${waveTotal}`, STRIP.x + 18, STRIP.y + 56, {
+    size: T.small,
+    color: C.dim,
+    weight: 700,
+  });
+  const live = battle.enemies.filter((e) => !e.dead).length;
+  label(g, `${H.remaining} ${live}`, STRIP.x + STRIP.w - 18, STRIP.y + 56, {
+    size: T.small,
+    color: live > 0 ? C.ember : C.mint,
+    align: 'right',
+    weight: 800,
+  });
+}
+
+/** Top-centre: the cascade counter — only loud while a chain is alive. */
+function chainBox(g: Ctx, battle: Battle, active: boolean, pulse: number): void {
+  const r = CHAIN_BOX;
+  const depth = Math.max(1, battle.chain);
+  plate(g, r.x, r.y, r.w, r.h, {
+    radius: R.md,
+    fill: active ? '#2b1c42' : '#121a2c',
+    edge: active ? C.violet : C.lineHi,
+    depth: 5,
+  });
+  label(g, H.chain, r.x + r.w / 2, r.y + 24, {
+    size: T.micro,
+    color: active ? C.violet : C.faint,
+    align: 'center',
+    weight: 800,
+    tracking: 2,
+  });
+  label(g, `×${depth}`, r.x + r.w / 2, r.y + 54, {
+    size: active ? 30 : 24,
+    color: active ? C.ink : C.faint,
+    align: 'center',
+    weight: 800,
+  });
+  if (pulse > 0 && active) {
+    g.strokeStyle = rgba(C.violet, pulse * 0.8);
+    g.lineWidth = 3;
+    rr(g, r.x - 2, r.y - 2, r.w + 4, r.h + 4, R.md + 2);
+    g.stroke();
+  }
+}
+
+function controlButton(
+  g: Ctx,
+  ui: Ui,
+  id: string,
+  rect: Rect,
+  text: string,
+  tone: string,
+  tooltip: string,
+): void {
+  const hit = ui.hit(id, rect, { tooltip });
+  g.fillStyle = hit.hover ? rgba(tone, 0.26) : rgba(tone, 0.1);
+  rr(g, rect.x, rect.y, rect.w, rect.h, rect.h / 2);
+  g.fill();
+  g.strokeStyle = rgba(tone, hit.hover ? 0.85 : 0.45);
+  g.lineWidth = W.thin;
+  rr(g, rect.x + 1, rect.y + 1, rect.w - 2, rect.h - 2, rect.h / 2);
+  g.stroke();
+  label(g, text, rect.x + rect.w / 2, rect.y + rect.h / 2 + 6, {
+    size: T.small,
+    color: C.ink,
+    align: 'center',
+    weight: 800,
+  });
+}
+
+export interface HudInteraction {
+  wildcardMode: boolean;
+  eligible: number[];
+  hoveredSlot: number | null;
+}
+
+export interface HudOptions {
+  time: number;
+  wildcardMode: boolean;
+  eligible: number[];
+  hoveredSlot: number | null;
+  speed: number;
+  chainActive: boolean;
+  chainPulse: number;
+  waveIndex: number;
+  waveTotal: number;
+  /** Short contextual hint; null hides the strip entirely. */
+  hint: string | null;
+  /** Teaching hint is emphasised and stays longer. */
+  hintEmphasis: boolean;
+}
+
+export function drawHud(g: Ctx, ui: Ui, battle: Battle, opts: HudOptions): void {
+  const inter: HudInteraction = {
+    wildcardMode: opts.wildcardMode,
+    eligible: opts.eligible,
+    hoveredSlot: opts.hoveredSlot,
+  };
+
+  // Deck bed so the control panel reads as part of the machine.
+  const deckGrad = g.createLinearGradient(0, DECK.top - 26, 0, DECK.top + 60);
+  deckGrad.addColorStop(0, rgba('#05070e', 0));
+  deckGrad.addColorStop(1, rgba('#05070e', 0.94));
+  g.fillStyle = deckGrad;
+  g.fillRect(0, DECK.top - 26, 1440, 90);
+  g.fillStyle = '#080c16';
+  g.fillRect(0, DECK.top + 64, 1440, 810 - DECK.top - 64);
+  g.strokeStyle = rgba(C.lineHi, 0.35);
+  g.lineWidth = W.hair;
+  g.beginPath();
+  g.moveTo(0, DECK.top + 64);
+  g.lineTo(1440, DECK.top + 64);
+  g.stroke();
+
+  label(g, H.recipes, CARD.x, DECK.top + 14, {
+    size: T.micro,
+    color: C.faint,
+    weight: 800,
+    tracking: 2.4,
+  });
+
+  for (let slot = 0; slot < 3; slot++) {
+    blueprintCard(g, battle, battle.slots[slot], slot, opts.time, inter);
+  }
+  incomingPanel(g, battle);
+  bagBox(g, battle);
+  poolTray(g, battle, opts.time);
+  wildcard(g, ui, battle, opts.time, inter);
+  encounterStrip(g, battle, opts.waveIndex, opts.waveTotal);
+  chainBox(g, battle, battle.chain >= 2 && opts.chainActive, opts.chainPulse);
+
+  // Controls: speed and pause, plus the run's position.
+  plate(g, CONTROLS.x, CONTROLS.y, CONTROLS.w, CONTROLS.h, {
+    radius: R.pill,
+    fill: '#161f34',
+    edge: C.lineHi,
+    depth: 3,
+  });
+  controlButton(g, ui, 'hud.speed', { x: CONTROLS.x + 6, y: CONTROLS.y + 6, w: 92, h: 32 }, `${opts.speed}×`, C.cyan, H.speedTip);
+  controlButton(g, ui, 'hud.pause', { x: CONTROLS.x + 104, y: CONTROLS.y + 6, w: 86, h: 32 }, 'II', C.gold, H.pauseTip);
+
+  if (opts.hint) {
+    const a = opts.hintEmphasis ? 1 : 0.92;
+    g.save();
+    g.globalAlpha = a;
+    plate(g, HINT.x, HINT.y, HINT.w, HINT.h, {
+      radius: R.sm,
+      fill: '#101a30',
+      edge: rgba(C.cyan, 0.55),
+      depth: 3,
+    });
+    label(g, opts.hint, HINT.x + 16, HINT.y + 25, {
+      size: T.small,
+      color: C.ink,
+      weight: 600,
+    });
+    g.restore();
+  }
+}

@@ -1,49 +1,73 @@
-/** Boot the engine. */
-import { App } from './app';
+/**
+ * Entry point: wires the screens, restores saved state and runs the fixed-step
+ * frame loop. Deterministic simulation, presentation on top.
+ */
+import './styles.css';
+import { App } from './app/app';
+import { store } from './core/save';
+import { sfx } from './core/audio';
+import { setLang } from './core/i18n';
+import { trace } from './alphabet/trace';
+import { RUN } from './content/encounters';
+import { Run } from './run/run';
+import type { Battle } from './battle/battle';
 import { createTitleScreen } from './ui/screens/title';
-import { createForgeScreen } from './ui/screens/forge';
+import { createKitScreen } from './ui/screens/kit';
 import { createBattleScreen } from './ui/screens/battle';
 import { createSpoilsScreen } from './ui/screens/spoils';
-import { createMarketScreen } from './ui/screens/market';
-import { createShrineScreen } from './ui/screens/shrine';
 import { createSummaryScreen } from './ui/screens/summary';
-import { createHelpScreen } from './ui/screens/help';
-import { buildBattle } from './game/setup';
-import { sfx } from './core/audio';
+import { createCodexScreen } from './ui/screens/codex';
+import { createSettingsScreen } from './ui/screens/settings';
+
+declare global {
+  interface Window {
+    /** Debug surface used by the headless screenshot/balance harness. */
+    __AE?: {
+      app: App;
+      goto: (id: string) => void;
+      startRun: (seed: number, kitId: string) => void;
+      battle: () => Battle | null;
+      advanceTime: (seconds: number, step?: number) => void;
+      traceDump: () => string;
+      run: () => Run | null;
+    };
+  }
+}
 
 const canvas = document.getElementById('stage') as HTMLCanvasElement | null;
 if (!canvas) throw new Error('missing #stage');
 
-const app = new App(canvas);
+store.load();
+setLang(store.settings.lang);
+sfx.applySettings(store.settings);
+trace.enabled = store.settings.trace;
+if (store.settings.music > 0) sfx.startMusic();
 
-// The battle screen is handed a fully built battle so it never has to know how
-// one is assembled.
-const forgeScreen = createForgeScreen();
-const battleScreen = createBattleScreen();
-const withBattleBuild: typeof battleScreen = {
-  ...battleScreen,
-  enter(a) {
-    if (a.run) a.battle = buildBattle(a.run);
-    battleScreen.enter?.(a);
-  },
-  exit(a) {
-    battleScreen.exit?.(a);
-  },
-};
+const app = new App(canvas);
 
 app.register(
   createTitleScreen(),
-  forgeScreen,
-  withBattleBuild,
+  createKitScreen(),
+  createBattleScreen(),
   createSpoilsScreen(),
-  createMarketScreen(),
-  createShrineScreen(),
   createSummaryScreen(),
-  createHelpScreen(),
+  createCodexScreen(),
+  createSettingsScreen(),
 );
 
-// start on the title
-app.goto('title');
+// Resume a suspended run, or start clean on the title.
+if (store.suspendedRun) {
+  const restored = Run.deserialize(store.suspendedRun);
+  if (restored && !restored.finished) {
+    app.run = restored;
+    app.goto(restored.pendingRewards.length > 0 ? 'spoils' : 'battle');
+  } else {
+    store.saveRun(null);
+    app.goto('title');
+  }
+} else {
+  app.goto('title');
+}
 
 let last = performance.now();
 let acc = 0;
@@ -54,6 +78,8 @@ function frame(now: number): void {
   last = now;
   acc += dt;
   let guard = 0;
+  // The battle screen runs its own fixed-step loop so that changing the combat
+  // speed never changes simulation outcomes.
   while (acc >= STEP && guard++ < 8) {
     app.update(STEP);
     acc -= STEP;
@@ -62,7 +88,6 @@ function frame(now: number): void {
   requestAnimationFrame(frame);
 }
 
-// hide the boot splash once the first frame is on screen
 requestAnimationFrame((now) => {
   last = now;
   frame(now);
@@ -73,7 +98,6 @@ requestAnimationFrame((now) => {
   }
 });
 
-// first gesture unlocks the audio context
 const unlock = (): void => {
   sfx.unlock();
   window.removeEventListener('pointerdown', unlock);
@@ -82,3 +106,26 @@ const unlock = (): void => {
 window.addEventListener('pointerdown', unlock);
 window.addEventListener('keydown', unlock);
 
+// Debug hooks, opt-in via ?debug=1 so normal play stays clean.
+if (new URLSearchParams(window.location.search).has('debug')) {
+  app.debug = true;
+  window.__AE = {
+    app,
+    goto: (id) => app.goto(id),
+    startRun: (seed, kitId) => {
+      app.run = Run.create(seed, kitId);
+      app.goto('battle');
+    },
+    battle: () => app.battle,
+    run: () => app.run,
+    advanceTime: (seconds, step = 1 / 120) => {
+      const battle = app.battle;
+      if (!battle) return;
+      const steps = Math.floor(seconds / step);
+      for (let i = 0; i < steps; i++) battle.update(step);
+    },
+    traceDump: () => trace.dump(),
+  };
+  // Expose the encounter count for harness assertions.
+  void RUN;
+}

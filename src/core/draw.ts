@@ -1,685 +1,436 @@
-/** Canvas drawing primitives. Everything is written against a 1440x810 logical space. */
-import { C, F } from '../theme';
+/**
+ * Canvas drawing toolkit.
+ *
+ * Everything visual is procedural: no bitmap assets, no external art. Shapes are
+ * built from a small vocabulary (plates, tiles, slots, gauges) so the game keeps
+ * one coherent identity and can be re-skinned later without touching gameplay.
+ */
+import { C, DEPTH, F, R, T, W } from './theme';
 
 export type Ctx = CanvasRenderingContext2D;
 
-// ---- colour --------------------------------------------------------------
-const hexCache = new Map<string, [number, number, number]>();
-
-function rgb(hex: string): [number, number, number] {
-  let v = hexCache.get(hex);
-  if (!v) {
-    let h = hex.replace('#', '');
-    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
-    const n = parseInt(h, 16);
-    v = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-    hexCache.set(hex, v);
-  }
-  return v;
+export interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
 }
 
-export function alpha(hex: string, a: number): string {
-  const [r, g, b] = rgb(hex);
+/** `rgba` alias used by screens for quick alpha fills. */
+export const alpha = (hex: string, a: number): string => rgba(hex, a);
+
+export const rgba = (hex: string, a: number): string => {
+  const h = hex.replace('#', '');
+  const n = parseInt(h.length === 3 ? h.split('').map((c) => c + c).join('') : h, 16);
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
   return `rgba(${r},${g},${b},${a})`;
-}
-
-/** Mix two hex colours, t=0 -> a, t=1 -> b. */
-export function mix(a: string, b: string, t: number): string {
-  const [r1, g1, b1] = rgb(a);
-  const [r2, g2, b2] = rgb(b);
-  return `rgb(${Math.round(r1 + (r2 - r1) * t)},${Math.round(g1 + (g2 - g1) * t)},${Math.round(
-    b1 + (b2 - b1) * t,
-  )})`;
-}
-
-export function shade(hex: string, amt: number): string {
-  const [r, g, b] = rgb(hex);
-  const f = (v: number) => Math.max(0, Math.min(255, Math.round(v + amt * 255)));
-  return `rgb(${f(r)},${f(g)},${f(b)})`;
-}
-
-// ---- shapes --------------------------------------------------------------
-export function rr(ctx: Ctx, x: number, y: number, w: number, h: number, r: number): void {
-  const rad = Math.min(r, w / 2, h / 2);
-  ctx.beginPath();
-  ctx.moveTo(x + rad, y);
-  ctx.arcTo(x + w, y, x + w, y + h, rad);
-  ctx.arcTo(x + w, y + h, x, y + h, rad);
-  ctx.arcTo(x, y + h, x, y, rad);
-  ctx.arcTo(x, y, x + w, y, rad);
-  ctx.closePath();
-}
-
-export function circle(ctx: Ctx, x: number, y: number, r: number, fill?: string): void {
-  ctx.beginPath();
-  ctx.arc(x, y, r, 0, Math.PI * 2);
-  if (fill) {
-    ctx.fillStyle = fill;
-    ctx.fill();
-  }
-}
-
-export function poly(ctx: Ctx, pts: number[][], close = true): void {
-  ctx.beginPath();
-  ctx.moveTo(pts[0][0], pts[0][1]);
-  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
-  if (close) ctx.closePath();
-}
-
-/** Regular polygon (n sides) inscribed in a circle. */
-export function ngon(ctx: Ctx, x: number, y: number, r: number, n: number, rot = -Math.PI / 2): void {
-  ctx.beginPath();
-  for (let i = 0; i < n; i++) {
-    const a = rot + (i / n) * Math.PI * 2;
-    const px = x + Math.cos(a) * r;
-    const py = y + Math.sin(a) * r;
-    i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
-  }
-  ctx.closePath();
-}
-
-export type PanelOpts = {
-  fill?: string | CanvasGradient;
-  stroke?: string;
-  lw?: number;
-  r?: number;
-  shadow?: number;
-  shadowColor?: string;
-  top?: string;
-  dash?: number[];
-  glow?: string;
 };
 
-export function panel(
-  ctx: Ctx,
+export const mix = (a: string, b: string, t: number): string => {
+  const pa = parseInt(a.replace('#', ''), 16);
+  const pb = parseInt(b.replace('#', ''), 16);
+  const r = Math.round(((pa >> 16) & 255) * (1 - t) + ((pb >> 16) & 255) * t);
+  const g = Math.round(((pa >> 8) & 255) * (1 - t) + ((pb >> 8) & 255) * t);
+  const bl = Math.round((pa & 255) * (1 - t) + (pb & 255) * t);
+  return `rgb(${r},${g},${bl})`;
+};
+
+export function rr(g: Ctx, x: number, y: number, w: number, h: number, r: number): void {
+  const rad = Math.min(r, Math.abs(w) / 2, Math.abs(h) / 2);
+  g.beginPath();
+  g.moveTo(x + rad, y);
+  g.lineTo(x + w - rad, y);
+  g.arcTo(x + w, y, x + w, y + rad, rad);
+  g.lineTo(x + w, y + h - rad);
+  g.arcTo(x + w, y + h, x + w - rad, y + h, rad);
+  g.lineTo(x + rad, y + h);
+  g.arcTo(x, y + h, x, y + h - rad, rad);
+  g.lineTo(x, y + rad);
+  g.arcTo(x, y, x + rad, y, rad);
+  g.closePath();
+}
+
+export function shadow(g: Ctx, y = 6, a = 0.35, blur = 14): void {
+  g.shadowColor = rgba('#000000', a);
+  g.shadowBlur = blur;
+  g.shadowOffsetY = y;
+}
+
+export const noShadow = (g: Ctx): void => {
+  g.shadowColor = 'rgba(0,0,0,0)';
+  g.shadowBlur = 0;
+  g.shadowOffsetY = 0;
+};
+
+/** A raised metal plate — the base surface for panels and HUD blocks. */
+export function plate(
+  g: Ctx,
   x: number,
   y: number,
   w: number,
   h: number,
-  o: PanelOpts = {},
+  opts: { radius?: number; fill?: string; edge?: string; depth?: number; alpha?: number } = {},
 ): void {
-  ctx.save();
-  if (o.shadow) {
-    ctx.shadowBlur = o.shadow;
-    ctx.shadowColor = o.shadowColor ?? 'rgba(0,0,0,0.6)';
+  const radius = opts.radius ?? R.md;
+  const depth = opts.depth ?? DEPTH.plate / 2;
+  g.save();
+  if (opts.alpha !== undefined) g.globalAlpha = opts.alpha;
+  // contact shadow
+  g.fillStyle = rgba('#000000', 0.34);
+  rr(g, x, y + depth, w, h, radius);
+  g.fill();
+  // face
+  const grad = g.createLinearGradient(x, y, x, y + h);
+  grad.addColorStop(0, opts.fill ?? C.panelHi);
+  grad.addColorStop(1, opts.fill ? mix(opts.fill, '#000000', 0.25) : C.panel);
+  g.fillStyle = grad;
+  rr(g, x, y, w, h, radius);
+  g.fill();
+  // top highlight
+  g.strokeStyle = rgba('#ffffff', 0.07);
+  g.lineWidth = W.hair;
+  rr(g, x + 0.5, y + 0.5, w - 1, h - 1, radius);
+  g.stroke();
+  if (opts.edge) {
+    g.strokeStyle = rgba(opts.edge, 0.55);
+    g.lineWidth = W.thin;
+    rr(g, x + 1, y + 1, w - 2, h - 2, radius);
+    g.stroke();
   }
-  rr(ctx, x, y, w, h, o.r ?? 12);
-  if (o.fill) {
-    ctx.fillStyle = o.fill;
-    ctx.fill();
-  }
-  ctx.shadowBlur = 0;
-  if (o.dash) ctx.setLineDash(o.dash);
-  if (o.stroke) {
-    if (o.glow) {
-      ctx.shadowBlur = 14;
-      ctx.shadowColor = o.glow;
-    }
-    ctx.strokeStyle = o.stroke;
-    ctx.lineWidth = o.lw ?? 1;
-    ctx.stroke();
-    ctx.shadowBlur = 0;
-  }
-  ctx.setLineDash([]);
-  if (o.top) {
-    ctx.save();
-    rr(ctx, x + 0.5, y + 0.5, w - 1, h - 1, (o.r ?? 12) - 0.5);
-    ctx.clip();
-    const g = ctx.createLinearGradient(0, y, 0, y + Math.min(h, 26));
-    g.addColorStop(0, o.top);
-    g.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(x, y, w, Math.min(h, 26));
-    ctx.restore();
-  }
-  ctx.restore();
+  g.restore();
 }
 
-// ---- text ----------------------------------------------------------------
-export type TextOpts = {
-  font?: string;
-  size?: number;
-  weight?: number;
-  color?: string;
-  align?: CanvasTextAlign;
-  baseline?: CanvasTextBaseline;
-  track?: number;
-  alpha?: number;
-  glow?: string;
-  glowSize?: number;
-  shadow?: boolean;
-  max?: number;
-};
-
-export function fontOf(o: TextOpts): string {
-  const weight = o.weight ?? 500;
-  const fam = o.font ?? F.ui;
-  return `${weight} ${o.size ?? 14}px ${fam}`;
+/** Inset well — used for the letter pool tray and empty slots. */
+export function well(g: Ctx, x: number, y: number, w: number, h: number, radius: number = R.md): void {
+  g.save();
+  const grad = g.createLinearGradient(x, y, x, y + h);
+  grad.addColorStop(0, C.panelLo);
+  grad.addColorStop(1, mix(C.panelLo, '#ffffff', 0.04));
+  g.fillStyle = grad;
+  rr(g, x, y, w, h, radius);
+  g.fill();
+  g.strokeStyle = rgba('#000000', 0.5);
+  g.lineWidth = W.thin;
+  rr(g, x + 1, y + 1, w - 2, h - 2, radius);
+  g.stroke();
+  g.strokeStyle = rgba(C.lineHi, 0.35);
+  g.lineWidth = W.hair;
+  rr(g, x + 0.5, y + 0.5, w - 1, h - 1, radius);
+  g.stroke();
+  g.restore();
 }
 
-export function text(ctx: Ctx, str: string, x: number, y: number, o: TextOpts = {}): number {
-  ctx.save();
-  ctx.font = fontOf(o);
-  (ctx as Ctx & { letterSpacing: string }).letterSpacing = o.track ? `${o.track}px` : '0px';
-  ctx.textAlign = o.align ?? 'left';
-  ctx.textBaseline = o.baseline ?? 'alphabetic';
-  if (o.alpha !== undefined) ctx.globalAlpha = o.alpha;
-  if (o.shadow) {
-    ctx.shadowBlur = 8;
-    ctx.shadowColor = 'rgba(0,0,0,0.75)';
-  }
-  if (o.glow) {
-    ctx.shadowBlur = o.glowSize ?? 12;
-    ctx.shadowColor = o.glow;
-  }
-  ctx.fillStyle = o.color ?? C.ink;
-  const w = ctx.measureText(str).width;
-  if (o.max && w > o.max) {
-    ctx.restore();
-    return text(ctx, ellipsize(ctx, str, o.max, o), x, y, { ...o, max: undefined });
-  }
-  ctx.fillText(str, x, y);
-  ctx.restore();
-  return w;
-}
+export type TileState =
+  /** Solid letterpress tile holding a letter. */
+  | 'filled'
+  /** Empty recessed slot waiting for a letter. */
+  | 'slot'
+  /** Missing letter, emphasised — the wildcard can fill this. */
+  | 'missing'
+  /** Just filled by the wildcard this instant. */
+  | 'wild'
+  /** Locked / consumed during the word-completion beat. */
+  | 'lock';
 
-export function ellipsize(ctx: Ctx, str: string, max: number, o: TextOpts): string {
-  ctx.save();
-  ctx.font = fontOf(o);
-  if (ctx.measureText(str).width <= max) {
-    ctx.restore();
-    return str;
-  }
-  let out = str;
-  while (out.length > 1 && ctx.measureText(out + '…').width > max) out = out.slice(0, -1);
-  ctx.restore();
-  return out + '…';
-}
-
-export function textWidth(ctx: Ctx, str: string, o: TextOpts = {}): number {
-  ctx.save();
-  ctx.font = fontOf(o);
-  (ctx as Ctx & { letterSpacing: string }).letterSpacing = o.track ? `${o.track}px` : '0px';
-  const w = ctx.measureText(str).width;
-  ctx.restore();
-  return w + (o.track ? o.track : 0);
-}
-
-/** Text with a vertical gradient fill. */
-export function gradText(
-  ctx: Ctx,
-  str: string,
+/**
+ * A physical letter tile. This single primitive carries most of the game's
+ * identity, so it takes the most care: bevel, letterpress ink and a real press
+ * depth when it locks into a word.
+ */
+export function tile(
+  g: Ctx,
   x: number,
   y: number,
-  top: string,
-  bottom: string,
-  o: TextOpts = {},
-): number {
-  ctx.save();
-  ctx.font = fontOf(o);
-  ctx.textAlign = o.align ?? 'left';
-  ctx.textBaseline = o.baseline ?? 'middle';
-  const w = ctx.measureText(str).width;
-  const size = o.size ?? 14;
-  const g = ctx.createLinearGradient(0, y - size * 0.6, 0, y + size * 0.6);
-  g.addColorStop(0, top);
-  g.addColorStop(1, bottom);
-  if (o.glow) {
-    ctx.shadowBlur = o.glowSize ?? 18;
-    ctx.shadowColor = o.glow;
+  size: number,
+  letter: string | null,
+  state: TileState = 'filled',
+  opts: { alpha?: number; press?: number; glow?: string; tilt?: number; scale?: number } = {},
+): void {
+  const s = size * (opts.scale ?? 1);
+  const px = x + (size - s) / 2;
+  const py = y + (size - s) / 2;
+  const press = opts.press ?? 0;
+  const rad = s * 0.16;
+  g.save();
+  if (opts.alpha !== undefined) g.globalAlpha = opts.alpha;
+  if (opts.tilt) {
+    g.translate(px + s / 2, py + s / 2);
+    g.rotate(opts.tilt);
+    g.translate(-(px + s / 2), -(py + s / 2));
   }
-  ctx.fillStyle = g;
-  ctx.fillText(str, x, y);
-  ctx.restore();
+
+  if (state === 'slot' || state === 'missing') {
+    const isMissing = state === 'missing';
+    g.fillStyle = rgba(isMissing ? C.gold : C.slotEdge, isMissing ? 0.16 : 0.3);
+    rr(g, px, py, s, s, rad);
+    g.fill();
+    g.setLineDash(isMissing ? [s * 0.16, s * 0.12] : [s * 0.1, s * 0.09]);
+    g.lineWidth = Math.max(2, s * 0.055);
+    g.strokeStyle = isMissing ? rgba(C.gold, 0.9) : rgba(C.slotEdge, 0.75);
+    rr(g, px + g.lineWidth / 2, py + g.lineWidth / 2, s - g.lineWidth, s - g.lineWidth, rad);
+    g.stroke();
+    g.setLineDash([]);
+    if (isMissing) {
+      g.fillStyle = rgba(C.gold, 0.75);
+      g.font = `700 ${s * 0.46}px ${F.ui}`;
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.fillText('?', px + s / 2, py + s / 2 + s * 0.02);
+    }
+    g.restore();
+    return;
+  }
+
+  const depth = DEPTH.tile - press * (DEPTH.tile - DEPTH.press);
+  const isWild = state === 'wild';
+  const isLock = state === 'lock';
+  const faceTop = isWild ? '#e6dcff' : isLock ? '#dff6e6' : C.tileFaceHi;
+  const faceBot = isWild ? '#b79cf0' : isLock ? '#8fd8a8' : C.tileFace;
+  const side = isWild ? '#6f4fb5' : isLock ? '#4c8a63' : C.tileDeep;
+
+  if (opts.glow) {
+    g.shadowColor = rgba(opts.glow, 0.85);
+    g.shadowBlur = s * 0.5;
+    g.shadowOffsetY = 0;
+  } else {
+    g.shadowColor = rgba('#000000', 0.42);
+    g.shadowBlur = s * 0.16;
+    g.shadowOffsetY = depth * 0.8;
+  }
+
+  // extruded side
+  g.fillStyle = side;
+  rr(g, px, py + depth, s, s, rad);
+  g.fill();
+  g.shadowColor = 'rgba(0,0,0,0)';
+  g.shadowBlur = 0;
+  g.shadowOffsetY = 0;
+
+  // face
+  const grad = g.createLinearGradient(px, py, px, py + s);
+  grad.addColorStop(0, faceTop);
+  grad.addColorStop(1, faceBot);
+  g.fillStyle = grad;
+  rr(g, px, py, s, s, rad);
+  g.fill();
+
+  // inner bevel
+  g.strokeStyle = rgba('#ffffff', 0.55);
+  g.lineWidth = Math.max(1, s * 0.03);
+  rr(g, px + s * 0.06, py + s * 0.06, s * 0.88, s * 0.88, rad * 0.8);
+  g.stroke();
+  g.strokeStyle = rgba(side, 0.45);
+  rr(g, px + 1, py + 1, s - 2, s - 2, rad);
+  g.stroke();
+
+  if (letter) {
+    g.fillStyle = isWild ? '#2a1b4d' : isLock ? '#14401f' : C.tileInk;
+    g.font = `800 ${s * 0.56}px ${F.ui}`;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    // letterpress bite: ink sits slightly low and light comes from top
+    g.globalAlpha = (opts.alpha ?? 1) * 0.28;
+    g.fillText(letter, px + s / 2, py + s / 2 + s * 0.055);
+    g.globalAlpha = opts.alpha ?? 1;
+    g.fillText(letter, px + s / 2, py + s / 2 + s * 0.03);
+  }
+  g.restore();
+}
+
+/** Small rounded status chip. Shape (a leading dot) carries meaning beyond colour. */
+export function chip(
+  g: Ctx,
+  x: number,
+  y: number,
+  text: string,
+  color: string,
+  opts: { align?: 'left' | 'center'; font?: number; pad?: number; icon?: 'dot' | 'none' } = {},
+): number {
+  const size = opts.font ?? T.micro;
+  g.font = `700 ${size}px ${F.ui}`;
+  const tw = g.measureText(text).width;
+  const pad = opts.pad ?? 9;
+  const icon = opts.icon ?? 'dot';
+  const w = tw + pad * 2 + (icon === 'dot' ? size * 0.9 : 0);
+  const h = size + pad * 1.25;
+  const ox = opts.align === 'center' ? x - w / 2 : x;
+  g.fillStyle = rgba(color, 0.14);
+  rr(g, ox, y, w, h, h / 2);
+  g.fill();
+  g.strokeStyle = rgba(color, 0.45);
+  g.lineWidth = W.hair;
+  rr(g, ox + 0.5, y + 0.5, w - 1, h - 1, h / 2);
+  g.stroke();
+  let tx = ox + pad;
+  if (icon === 'dot') {
+    g.fillStyle = color;
+    g.beginPath();
+    g.arc(tx + size * 0.3, y + h / 2, size * 0.26, 0, Math.PI * 2);
+    g.fill();
+    tx += size * 0.9;
+  }
+  g.fillStyle = color;
+  g.textAlign = 'left';
+  g.textBaseline = 'middle';
+  g.fillText(text, tx, y + h / 2 + 0.5);
   return w;
 }
 
-// ---- widgets -------------------------------------------------------------
+export function label(
+  g: Ctx,
+  text: string,
+  x: number,
+  y: number,
+  opts: {
+    font?: string;
+    size?: number;
+    color?: string;
+    align?: CanvasTextAlign;
+    baseline?: CanvasTextBaseline;
+    weight?: number;
+    tracking?: number;
+    alpha?: number;
+  } = {},
+): void {
+  g.save();
+  g.font = `${opts.weight ?? 600} ${opts.size ?? T.body}px ${opts.font ?? F.ui}`;
+  g.fillStyle = opts.color ?? C.ink;
+  g.textAlign = opts.align ?? 'left';
+  g.textBaseline = opts.baseline ?? 'alphabetic';
+  if (opts.alpha !== undefined) g.globalAlpha = opts.alpha;
+  if (opts.tracking) {
+    // letter-spacing is not reliably supported everywhere; fake it for caps labels
+    let cx = x;
+    const chars = [...text];
+    const total = chars.reduce((acc, ch) => acc + g.measureText(ch).width + opts.tracking!, 0);
+    if (opts.align === 'center') cx = x - total / 2;
+    else if (opts.align === 'right') cx = x - total;
+    for (const ch of chars) {
+      g.textAlign = 'left';
+      g.fillText(ch, cx, y);
+      cx += g.measureText(ch).width + opts.tracking;
+    }
+  } else {
+    g.fillText(text, x, y);
+  }
+  g.restore();
+}
+
+/** Horizontal progress bar with a notched track. */
 export function bar(
-  ctx: Ctx,
+  g: Ctx,
   x: number,
   y: number,
   w: number,
   h: number,
   pct: number,
   color: string,
-  o: { bg?: string; r?: number; ghost?: number; flip?: boolean } = {},
+  opts: { track?: string; glow?: boolean } = {},
 ): void {
-  const r = o.r ?? h / 2;
-  ctx.save();
-  rr(ctx, x, y, w, h, r);
-  ctx.fillStyle = o.bg ?? 'rgba(255,255,255,0.07)';
-  ctx.fill();
-  if (o.ghost !== undefined && o.ghost > pct) {
-    const gw = w * Math.min(1, o.ghost);
-    rr(ctx, x, y, gw, h, r);
-    ctx.fillStyle = alpha('#ffffff', 0.2);
-    ctx.fill();
-  }
   const p = Math.max(0, Math.min(1, pct));
-  if (p > 0.001) {
-    const fw = Math.max(h, w * p);
-    rr(ctx, o.flip ? x + w - fw : x, y, fw, h, r);
-    const g = ctx.createLinearGradient(0, y, 0, y + h);
-    g.addColorStop(0, shade(color, 0.16));
-    g.addColorStop(1, color);
-    ctx.fillStyle = g;
-    ctx.fill();
-    ctx.save();
-    ctx.clip();
-    ctx.globalAlpha = 0.35;
-    ctx.fillStyle = shade(color, 0.4);
-    ctx.fillRect(x, y, w, Math.max(1, h * 0.32));
-    ctx.restore();
+  g.fillStyle = opts.track ?? rgba('#000000', 0.45);
+  rr(g, x, y, w, h, h / 2);
+  g.fill();
+  if (p > 0) {
+    g.save();
+    if (opts.glow) {
+      g.shadowColor = rgba(color, 0.7);
+      g.shadowBlur = 10;
+    }
+    const grad = g.createLinearGradient(x, y, x, y + h);
+    grad.addColorStop(0, mix(color, '#ffffff', 0.25));
+    grad.addColorStop(1, color);
+    g.fillStyle = grad;
+    rr(g, x, y, Math.max(h, w * p), h, h / 2);
+    g.fill();
+    g.restore();
   }
-  ctx.restore();
+  g.strokeStyle = rgba(C.lineHi, 0.4);
+  g.lineWidth = W.hair;
+  rr(g, x + 0.5, y + 0.5, w - 1, h - 1, h / 2);
+  g.stroke();
 }
 
-export function glowDot(ctx: Ctx, x: number, y: number, r: number, color: string, puls = 1): void {
-  const g = ctx.createRadialGradient(x, y, 0, x, y, r * 3);
-  g.addColorStop(0, alpha(color, 0.85 * puls));
-  g.addColorStop(0.35, alpha(color, 0.3 * puls));
-  g.addColorStop(1, alpha(color, 0));
-  circle(ctx, x, y, r * 3);
-  ctx.fillStyle = g;
-  ctx.fill();
-  circle(ctx, x, y, r);
-  ctx.fillStyle = color;
-  ctx.fill();
+/** Diagonal hazard stripes — used to mark blocked / disabled states. */
+export function hazardStripes(g: Ctx, x: number, y: number, w: number, h: number, color: string): void {
+  g.save();
+  rr(g, x, y, w, h, R.sm);
+  g.clip();
+  g.strokeStyle = rgba(color, 0.35);
+  g.lineWidth = 6;
+  for (let i = -h; i < w + h; i += 16) {
+    g.beginPath();
+    g.moveTo(x + i, y + h);
+    g.lineTo(x + i + h, y);
+    g.stroke();
+  }
+  g.restore();
 }
 
-// ---- icon set (drawn, never bundled) -------------------------------------
-export type IconName =
-  | 'heart'
-  | 'bolt'
-  | 'coin'
-  | 'skull'
-  | 'lock'
-  | 'wave'
-  | 'shield'
-  | 'star'
-  | 'gear'
-  | 'chevron'
-  | 'pause'
-  | 'play'
-  | 'sound'
-  | 'mute'
-  | 'plus'
-  | 'close'
-  | 'check'
-  | 'arrow'
-  | 'flask'
-  | 'anvil'
-  | 'map'
-  | 'sword';
-
-export function icon(
-  ctx: Ctx,
-  name: IconName,
+/** Soft radial glow, cheap and reused by most VFX. */
+export function glow(
+  g: Ctx,
   x: number,
   y: number,
-  s: number,
+  radius: number,
   color: string,
-  filled = true,
+  alpha = 0.5,
 ): void {
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.fillStyle = color;
-  ctx.strokeStyle = color;
-  ctx.lineWidth = Math.max(1.4, s * 0.11);
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-  const h = s / 2;
-  const P = (fn: () => void) => {
-    ctx.beginPath();
-    fn();
-  };
-  switch (name) {
-    case 'heart':
-      P(() => {
-        ctx.moveTo(0, h * 0.92);
-        ctx.bezierCurveTo(-h * 1.5, -h * 0.35, -h * 0.55, -h * 1.35, 0, -h * 0.4);
-        ctx.bezierCurveTo(h * 0.55, -h * 1.35, h * 1.5, -h * 0.35, 0, h * 0.92);
-      });
-      filled ? ctx.fill() : ctx.stroke();
-      break;
-    case 'bolt':
-      P(() => {
-        ctx.moveTo(h * 0.28, -h);
-        ctx.lineTo(-h * 0.62, h * 0.14);
-        ctx.lineTo(-h * 0.02, h * 0.14);
-        ctx.lineTo(-h * 0.28, h);
-        ctx.lineTo(h * 0.62, -h * 0.16);
-        ctx.lineTo(h * 0.02, -h * 0.16);
-      });
-      ctx.closePath();
-      filled ? ctx.fill() : ctx.stroke();
-      break;
-    case 'coin':
-      P(() => ctx.arc(0, 0, h * 0.9, 0, Math.PI * 2));
-      ctx.stroke();
-      P(() => ctx.arc(0, 0, h * 0.44, 0, Math.PI * 2));
-      ctx.fill();
-      break;
-    case 'skull':
-      P(() => {
-        ctx.arc(0, -h * 0.16, h * 0.72, Math.PI, 0);
-        ctx.lineTo(h * 0.72, h * 0.3);
-        ctx.lineTo(h * 0.3, h * 0.3);
-        ctx.lineTo(h * 0.3, h * 0.85);
-        ctx.lineTo(-h * 0.3, h * 0.85);
-        ctx.lineTo(-h * 0.3, h * 0.3);
-        ctx.lineTo(-h * 0.72, h * 0.3);
-      });
-      ctx.closePath();
-      ctx.fill();
-      ctx.fillStyle = 'rgba(0,0,0,0.85)';
-      P(() => ctx.arc(-h * 0.32, -h * 0.2, h * 0.2, 0, Math.PI * 2));
-      ctx.fill();
-      P(() => ctx.arc(h * 0.32, -h * 0.2, h * 0.2, 0, Math.PI * 2));
-      ctx.fill();
-      break;
-    case 'lock':
-      P(() => rr(ctx, -h * 0.7, -h * 0.05, h * 1.4, h * 0.95, h * 0.18));
-      ctx.fill();
-      P(() => ctx.arc(0, -h * 0.2, h * 0.42, Math.PI, 0));
-      ctx.stroke();
-      break;
-    case 'shield':
-      P(() => {
-        ctx.moveTo(0, -h);
-        ctx.lineTo(h * 0.82, -h * 0.55);
-        ctx.lineTo(h * 0.82, h * 0.15);
-        ctx.bezierCurveTo(h * 0.82, h * 0.75, h * 0.3, h, 0, h);
-        ctx.bezierCurveTo(-h * 0.3, h, -h * 0.82, h * 0.75, -h * 0.82, h * 0.15);
-        ctx.lineTo(-h * 0.82, -h * 0.55);
-      });
-      ctx.closePath();
-      filled ? ctx.fill() : ctx.stroke();
-      break;
-    case 'star':
-      P(() => {
-        for (let i = 0; i < 10; i++) {
-          const a = -Math.PI / 2 + (i / 10) * Math.PI * 2;
-          const rad = i % 2 === 0 ? h : h * 0.45;
-          const px = Math.cos(a) * rad;
-          const py = Math.sin(a) * rad;
-          i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
-        }
-      });
-      ctx.closePath();
-      filled ? ctx.fill() : ctx.stroke();
-      break;
-    case 'gear':
-      P(() => ctx.arc(0, 0, h * 0.42, 0, Math.PI * 2));
-      ctx.stroke();
-      for (let i = 0; i < 6; i++) {
-        const a = (i / 6) * Math.PI * 2;
-        ctx.save();
-        ctx.rotate(a);
-        P(() => rr(ctx, -h * 0.14, -h * 0.98, h * 0.28, h * 0.36, h * 0.08));
-        ctx.fill();
-        ctx.restore();
-      }
-      break;
-    case 'wave':
-      ctx.lineWidth = Math.max(1.5, s * 0.13);
-      for (let k = -1; k <= 1; k++) {
-        P(() => {
-          ctx.moveTo(-h, k * h * 0.5);
-          ctx.bezierCurveTo(-h * 0.4, k * h * 0.5 - h * 0.5, h * 0.4, k * h * 0.5 + h * 0.5, h, k * h * 0.5);
-        });
-        ctx.stroke();
-      }
-      break;
-    case 'chevron':
-      P(() => {
-        ctx.moveTo(-h * 0.4, -h * 0.7);
-        ctx.lineTo(h * 0.45, 0);
-        ctx.lineTo(-h * 0.4, h * 0.7);
-      });
-      ctx.stroke();
-      break;
-    case 'pause':
-      P(() => rr(ctx, -h * 0.62, -h * 0.8, h * 0.44, h * 1.6, h * 0.14));
-      ctx.fill();
-      P(() => rr(ctx, h * 0.18, -h * 0.8, h * 0.44, h * 1.6, h * 0.14));
-      ctx.fill();
-      break;
-    case 'play':
-      P(() => {
-        ctx.moveTo(-h * 0.55, -h * 0.85);
-        ctx.lineTo(h * 0.75, 0);
-        ctx.lineTo(-h * 0.55, h * 0.85);
-      });
-      ctx.closePath();
-      ctx.fill();
-      break;
-    case 'sound':
-      P(() => {
-        ctx.moveTo(-h * 0.85, -h * 0.3);
-        ctx.lineTo(-h * 0.35, -h * 0.3);
-        ctx.lineTo(h * 0.15, -h * 0.85);
-        ctx.lineTo(h * 0.15, h * 0.85);
-        ctx.lineTo(-h * 0.35, h * 0.3);
-        ctx.lineTo(-h * 0.85, h * 0.3);
-      });
-      ctx.closePath();
-      ctx.fill();
-      ctx.lineWidth = Math.max(1.2, s * 0.09);
-      P(() => ctx.arc(h * 0.15, 0, h * 0.55, -Math.PI / 3, Math.PI / 3));
-      ctx.stroke();
-      P(() => ctx.arc(h * 0.15, 0, h * 0.92, -Math.PI / 3, Math.PI / 3));
-      ctx.stroke();
-      break;
-    case 'mute':
-      P(() => {
-        ctx.moveTo(-h * 0.85, -h * 0.3);
-        ctx.lineTo(-h * 0.35, -h * 0.3);
-        ctx.lineTo(h * 0.15, -h * 0.85);
-        ctx.lineTo(h * 0.15, h * 0.85);
-        ctx.lineTo(-h * 0.35, h * 0.3);
-        ctx.lineTo(-h * 0.85, h * 0.3);
-      });
-      ctx.closePath();
-      ctx.fill();
-      ctx.lineWidth = Math.max(1.4, s * 0.11);
-      P(() => {
-        ctx.moveTo(h * 0.42, -h * 0.42);
-        ctx.lineTo(h * 0.92, h * 0.42);
-        ctx.moveTo(h * 0.92, -h * 0.42);
-        ctx.lineTo(h * 0.42, h * 0.42);
-      });
-      ctx.stroke();
-      break;
-    case 'plus':
-      ctx.lineWidth = Math.max(1.8, s * 0.16);
-      P(() => {
-        ctx.moveTo(0, -h * 0.75);
-        ctx.lineTo(0, h * 0.75);
-        ctx.moveTo(-h * 0.75, 0);
-        ctx.lineTo(h * 0.75, 0);
-      });
-      ctx.stroke();
-      break;
-    case 'close':
-      ctx.lineWidth = Math.max(1.8, s * 0.14);
-      P(() => {
-        ctx.moveTo(-h * 0.65, -h * 0.65);
-        ctx.lineTo(h * 0.65, h * 0.65);
-        ctx.moveTo(h * 0.65, -h * 0.65);
-        ctx.lineTo(-h * 0.65, h * 0.65);
-      });
-      ctx.stroke();
-      break;
-    case 'check':
-      ctx.lineWidth = Math.max(2, s * 0.17);
-      P(() => {
-        ctx.moveTo(-h * 0.7, h * 0.05);
-        ctx.lineTo(-h * 0.15, h * 0.6);
-        ctx.lineTo(h * 0.75, -h * 0.6);
-      });
-      ctx.stroke();
-      break;
-    case 'arrow':
-      ctx.lineWidth = Math.max(1.8, s * 0.15);
-      P(() => {
-        ctx.moveTo(-h * 0.8, 0);
-        ctx.lineTo(h * 0.75, 0);
-        ctx.moveTo(h * 0.2, -h * 0.55);
-        ctx.lineTo(h * 0.78, 0);
-        ctx.lineTo(h * 0.2, h * 0.55);
-      });
-      ctx.stroke();
-      break;
-    case 'sword':
-      P(() => {
-        ctx.moveTo(0, -h);
-        ctx.lineTo(h * 0.26, -h * 0.5);
-        ctx.lineTo(h * 0.26, h * 0.3);
-        ctx.lineTo(-h * 0.26, h * 0.3);
-        ctx.lineTo(-h * 0.26, -h * 0.5);
-      });
-      ctx.closePath();
-      ctx.fill();
-      P(() => rr(ctx, -h * 0.72, h * 0.3, h * 1.44, h * 0.24, h * 0.1));
-      ctx.fill();
-      P(() => rr(ctx, -h * 0.14, h * 0.55, h * 0.28, h * 0.45, h * 0.08));
-      ctx.fill();
-      break;
-    case 'flask':
-      P(() => {
-        ctx.moveTo(-h * 0.3, -h);
-        ctx.lineTo(h * 0.3, -h);
-        ctx.lineTo(h * 0.3, -h * 0.35);
-        ctx.lineTo(h * 0.9, h * 0.75);
-        ctx.lineTo(-h * 0.9, h * 0.75);
-        ctx.lineTo(-h * 0.3, -h * 0.35);
-      });
-      ctx.closePath();
-      ctx.fill();
-      break;
-    case 'anvil':
-      P(() => {
-        ctx.moveTo(-h * 0.95, -h * 0.5);
-        ctx.lineTo(h * 0.95, -h * 0.5);
-        ctx.lineTo(h * 0.42, h * 0.1);
-        ctx.lineTo(h * 0.3, h * 0.5);
-        ctx.lineTo(-h * 0.3, h * 0.5);
-        ctx.lineTo(-h * 0.42, h * 0.1);
-      });
-      ctx.closePath();
-      ctx.fill();
-      P(() => rr(ctx, -h * 0.55, h * 0.55, h * 1.1, h * 0.4, h * 0.1));
-      ctx.fill();
-      break;
-    case 'map':
-      P(() => {
-        ctx.moveTo(-h, -h * 0.7);
-        ctx.lineTo(-h * 0.35, -h);
-        ctx.lineTo(h * 0.35, -h * 0.7);
-        ctx.lineTo(h, -h);
-        ctx.lineTo(h, h * 0.7);
-        ctx.lineTo(h * 0.35, h);
-        ctx.lineTo(-h * 0.35, h * 0.7);
-        ctx.lineTo(-h, h);
-      });
-      ctx.closePath();
-      ctx.fill();
-      break;
+  const grad = g.createRadialGradient(x, y, 0, x, y, radius);
+  grad.addColorStop(0, rgba(color, alpha));
+  grad.addColorStop(1, rgba(color, 0));
+  g.fillStyle = grad;
+  g.beginPath();
+  g.arc(x, y, radius, 0, Math.PI * 2);
+  g.fill();
+}
+
+/** Star / spark shape used for impact pops. */
+export function spark(g: Ctx, x: number, y: number, radius: number, points: number, color: string): void {
+  g.fillStyle = color;
+  g.beginPath();
+  for (let i = 0; i < points * 2; i++) {
+    const a = (i / (points * 2)) * Math.PI * 2;
+    const r = i % 2 === 0 ? radius : radius * 0.45;
+    const px = x + Math.cos(a) * r;
+    const py = y + Math.sin(a) * r;
+    if (i === 0) g.moveTo(px, py);
+    else g.lineTo(px, py);
   }
-  ctx.restore();
+  g.closePath();
+  g.fill();
 }
 
-/** Soft radial vignette / atmosphere blob. */
-export function blob(
-  ctx: Ctx,
-  x: number,
-  y: number,
-  r: number,
-  color: string,
-  strength = 0.5,
-): void {
-  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
-  g.addColorStop(0, alpha(color, strength));
-  g.addColorStop(1, alpha(color, 0));
-  ctx.fillStyle = g;
-  ctx.fillRect(x - r, y - r, r * 2, r * 2);
+/** Measure text with the exact font a label will use — keeps layout honest. */
+export function measure(
+  g: Ctx,
+  text: string,
+  opts: { size?: number; weight?: number; font?: string; tracking?: number } = {},
+): number {
+  g.save();
+  g.font = `${opts.weight ?? 600} ${opts.size ?? T.body}px ${opts.font ?? F.ui}`;
+  let w = g.measureText(text).width;
+  if (opts.tracking) w += Math.max(0, [...text].length - 1) * opts.tracking;
+  g.restore();
+  return w;
 }
 
-/** Draw a letter on a slab tile - the signature visual of the game. */
-export function slab(
-  ctx: Ctx,
-  ch: string,
-  x: number,
-  y: number,
-  size: number,
-  o: { fill?: string; ink?: string; r?: number; tilt?: number; lift?: boolean } = {},
-): void {
-  const r = o.r ?? size * 0.16;
-  ctx.save();
-  ctx.translate(x, y);
-  if (o.tilt) ctx.rotate(o.tilt);
-  const half = size / 2;
-  if (o.lift !== false) {
-    ctx.save();
-    ctx.shadowColor = 'rgba(0,0,0,0.55)';
-    ctx.shadowBlur = size * 0.18;
-    ctx.shadowOffsetY = size * 0.07;
-    rr(ctx, -half, -half, size, size, r);
-    ctx.fillStyle = o.fill ?? C.panelHi;
-    ctx.fill();
-    ctx.restore();
+/** Wraps text to a pixel width, returns the lines used. */
+export function wrap(g: Ctx, text: string, maxW: number): string[] {
+  const words = text.split(' ');
+  const lines: string[] = [];
+  let line = '';
+  for (const word of words) {
+    const test = line ? `${line} ${word}` : word;
+    if (g.measureText(test).width > maxW && line) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = test;
+    }
   }
-  const base = o.fill ?? C.panelHi;
-  const g = ctx.createLinearGradient(0, -half, 0, half);
-  g.addColorStop(0, shade(base, 0.1));
-  g.addColorStop(0.52, base);
-  g.addColorStop(1, shade(base, -0.09));
-  rr(ctx, -half, -half, size, size, r);
-  ctx.fillStyle = g;
-  ctx.fill();
-  ctx.save();
-  rr(ctx, -half, -half, size, size, r);
-  ctx.clip();
-  ctx.fillStyle = 'rgba(255,255,255,0.1)';
-  ctx.fillRect(-half, -half, size, size * 0.16);
-  ctx.restore();
-  rr(ctx, -half + 0.5, -half + 0.5, size - 1, size - 1, r - 0.5);
-  ctx.strokeStyle = 'rgba(255,255,255,0.12)';
-  ctx.lineWidth = 1;
-  ctx.stroke();
-  text(ctx, ch, 0, size * 0.04, {
-    font: F.slab,
-    weight: 800,
-    size: size * 0.62,
-    color: o.ink ?? C.ink,
-    align: 'center',
-    baseline: 'middle',
-  });
-  ctx.restore();
-}
-
-export function roundRectClip(ctx: Ctx, x: number, y: number, w: number, h: number, r: number): void {
-  rr(ctx, x, y, w, h, r);
-  ctx.clip();
-}
-
-/** Greedy word wrap using the current font options. */
-export function wrapLines(ctx: Ctx, str: string, maxW: number, o: TextOpts = {}): string[] {
-  ctx.save();
-  ctx.font = fontOf(o);
-  const words = str.split(' ');
-  const out: string[] = [];
-  let cur = '';
-  for (const w of words) {
-    const test = cur ? `${cur} ${w}` : w;
-    if (ctx.measureText(test).width > maxW && cur) {
-      out.push(cur);
-      cur = w;
-    } else cur = test;
-  }
-  if (cur) out.push(cur);
-  ctx.restore();
-  return out;
+  if (line) lines.push(line);
+  return lines;
 }

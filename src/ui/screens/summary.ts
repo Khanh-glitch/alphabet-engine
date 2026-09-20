@@ -1,266 +1,129 @@
-/** End of run: what happened, and the words you built. */
-import { C, F, R, SIZE, T } from '../../theme';
-import { alpha, blob, panel, text, textWidth } from '../../core/draw';
-import { clamp, easeOut } from '../../core/rng';
+/** Run summary: what the engine actually did. */
+import { C, R, T, VIEW } from '../../core/theme';
+
+import { loc, t } from '../../core/i18n';
 import { sfx } from '../../core/audio';
-import { button, heading } from '../kit';
-import { miniWeapon } from '../tiles';
-import { clearRun, newRun, saveRun, type RunState } from '../../game/run';
-import { BLESSING_BY_ID } from '../../game/run';
-import type { App, Screen } from '../../app';
+import { store } from '../../core/save';
+import { label, plate, rgba, rr, type Ctx } from '../../core/draw';
+import { BLUEPRINTS } from '../../content/blueprints';
+import type { Screen } from '../../app/app';
+
 
 export function createSummaryScreen(): Screen {
-  let t = 0;
-  let app!: App;
-  let exportOpen = false;
-
-  const restart = (app2: App, sameSeed: boolean): void => {
-    const run = app2.run;
-    const seed = sameSeed && run ? run.seedText : undefined;
-    app2.run = newRun(seed);
-    saveRun(app2.run);
-    app2.goto('forge');
-  };
-
   return {
     id: 'summary',
-    enter(a) {
-      app = a;
-      t = 0;
-      exportOpen = false;
-      sfx.lose();
+    enter() {
+      sfx.ui();
     },
-    update(dt) {
-      t += dt;
-    },
-    click(id) {
-      if (id === 'new') {
-        clearRun();
-        restart(app, false);
-      } else if (id === 'retry') restart(app, true);
-      else if (id === 'title') app.goto('title');
-      else if (id === 'copy') {
-        const run = app.run;
-        if (run) {
-          const text_ = seedBlurb(run);
-          void navigator.clipboard?.writeText(text_).then(
-            () => app.toast('Run summary copied', C.good),
-            () => app.toast('Could not copy', C.bad),
-          );
-        }
-      }
-    },
-    key(e) {
-      if (e.key === 'Escape') app.goto('title');
-      return false;
-    },
-    draw(g, a) {
-      app = a;
+    draw(g, app) {
       const run = app.run;
-      if (!run) return;
-      const win = run.victory;
-      const p = easeOut(clamp(t / 0.6, 0, 1));
+      const rec = run?.state.record;
+      const won = !!rec?.completed;
 
-      g.fillStyle = '#07080f';
-      g.fillRect(0, 0, SIZE.w, SIZE.h);
-      blob(g, SIZE.w / 2, 180, 620, win ? C.gold : C.bad, win ? 0.12 : 0.09);
-      blob(g, SIZE.w * 0.16, SIZE.h - 100, 420, C.violet, 0.05);
+      g.fillStyle = '#080c16';
+      g.fillRect(0, 0, VIEW.w, VIEW.h);
+      const grad = g.createRadialGradient(VIEW.w / 2, 200, 60, VIEW.w / 2, 200, 900);
+      grad.addColorStop(0, rgba(won ? C.mint : C.bad, 0.12));
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = grad;
+      g.fillRect(0, 0, VIEW.w, VIEW.h);
 
-      g.save();
-      g.globalAlpha = p;
-      text(g, win ? 'RUN COMPLETE' : 'CORE BREACHED', 60, 78, {
-        size: 42,
-        weight: 700,
-        color: win ? C.gold : C.bad,
-        font: F.ui,
-        baseline: 'middle',
-        track: 4,
-        glow: alpha(win ? C.gold : C.bad, 0.5),
-        glowSize: 24,
+      label(g, won ? t('runComplete') : t('runOver'), VIEW.w / 2, 130, {
+        align: 'center',
+        size: 62,
+        color: won ? C.mint : C.bad,
+        weight: 800,
+        tracking: 5,
       });
-      text(
-        g,
-        win
-          ? `The engine held for ${run.stats.wavesCleared} waves.`
-          : `The alphabet got through on wave ${run.wave}.`,
-        62,
-        116,
-        { size: T.lead, weight: 500, color: C.dim, font: F.ui, baseline: 'middle' },
-      );
-      g.restore();
+      label(g, run ? `${loc(run.kit.name)} · ${t('chaptersCleared')} ${rec?.cleared ?? 0}/8` : '', VIEW.w / 2, 166, {
+        align: 'center',
+        size: T.small,
+        color: C.faint,
+        weight: 700,
+        tracking: 1.5,
+      });
 
-      // stat grid
+      // Score card
+      const cardW = 720;
+      const cardX = VIEW.w / 2 - cardW / 2;
+      plate(g, cardX, 210, cardW, 250, { radius: R.lg, fill: '#121a2c', edge: C.lineHi, depth: 7 });
+
       const stats: [string, string, string][] = [
-        ['Waves cleared', `${run.stats.wavesCleared}`, C.ink],
-        ['Enemies killed', `${run.stats.kills}`, C.ink],
-        ['Weapons forged', `${run.stats.forged}`, C.gold],
-        ['Best cascade', `x${run.stats.bestCascade}`, C.violet],
-        ['Damage dealt', `${Math.round(run.stats.damage).toLocaleString()}`, C.ember],
-        ['Salvage earned', `${run.stats.salvageEarned}`, C.gold],
-        ['Longest word', run.stats.longestWord ? run.stats.longestWord.toUpperCase() : '-', C.cyan],
-        ['Core at end', `${Math.max(0, Math.round(run.core))} / ${run.maxCore}`, C.good],
+        [t('statsCrafts'), `${rec?.crafts ?? 0}`, C.gold],
+        [t('statsKills'), `${rec?.kills ?? 0}`, C.ember],
+        [t('statsBestChain'), `×${rec?.longestChain ?? 0}`, C.violet],
+        [t('statsFirstCraft'), rec?.firstCraft != null ? `${rec.firstCraft.toFixed(1)}s` : '—', C.cyan],
+        [t('statsLetters'), `${rec?.letters ?? 0}`, C.mint],
+        [t('statsWildcards'), `${rec?.wildcards ?? 0}`, C.rose],
       ];
-      const gx = 60;
-      let gy = 170;
-      const colW = 300;
-      stats.forEach((s, i) => {
-        const x = gx + (i % 2) * (colW + 20);
-        const y = gy + Math.floor(i / 2) * 58;
-        panel(g, x, y, colW, 48, { fill: C.bg1, stroke: alpha(C.line, 0.8), r: R.md });
-        text(g, s[0].toUpperCase(), x + 16, y + 24, {
-          size: T.micro,
-          weight: 700,
-          color: C.faint,
-          font: F.num,
-          baseline: 'middle',
-          track: 1.2,
-        });
-        text(g, s[1], x + colW - 16, y + 24, {
-          size: T.lead,
-          weight: 700,
-          color: s[2],
-          font: F.num,
-          align: 'right',
-          baseline: 'middle',
-        });
+      stats.forEach(([name, value, color], i) => {
+        const col = i % 3;
+        const row = Math.floor(i / 3);
+        const x = cardX + 40 + col * (cardW - 80) / 3;
+        const y = 250 + row * 96;
+        label(g, name, x, y, { size: T.micro, color: C.faint, weight: 800, tracking: 1.6 });
+        label(g, value, x, y + 40, { size: 36, color, weight: 800 });
       });
 
-      // blessings
-      let by = gy + 4 * 58 + 26;
-      text(g, 'BLESSINGS TAKEN', gx, by, {
-        size: T.micro,
-        weight: 700,
-        color: C.faint,
-        font: F.num,
-        baseline: 'middle',
-        track: 1.8,
-      });
-      by += 24;
-      if (!run.blessings.length) {
-        text(g, 'None', gx, by, { size: T.small, weight: 500, color: C.faint, font: F.ui, baseline: 'middle' });
-      }
-      let bx = gx;
-      for (const id of run.blessings) {
-        const b = BLESSING_BY_ID.get(id);
-        const label = b ? b.name : id;
-        const w = textWidth(g, label.toUpperCase(), { size: T.tiny, weight: 700, font: F.num }) + 22;
-        panel(g, bx, by - 12, w, 24, { fill: alpha(C.violet, 0.12), stroke: alpha(C.violet, 0.4), r: 6 });
-        text(g, label.toUpperCase(), bx + w / 2, by, {
-          size: T.tiny,
-          weight: 700,
-          color: C.violet,
-          font: F.num,
-          align: 'center',
-          baseline: 'middle',
-        });
-        bx += w + 6;
-        if (bx > gx + colW * 2 - 80) {
-          bx = gx;
-          by += 30;
-        }
-      }
-
-      // lexicon
-      const lx = 760;
-      const lw = SIZE.w - lx - 60;
-      panel(g, lx, 170, lw, 452, { fill: C.bg1, stroke: C.line, r: R.lg, top: 'rgba(255,255,255,0.03)' });
-      heading(g, 'Lexicon', lx + 20, 200, { size: T.lead });
-      text(g, `${run.placed.length} WORDS MOUNTED`, lx + lw - 20, 200, {
-        size: T.micro,
-        weight: 700,
-        color: C.faint,
-        font: F.num,
-        align: 'right',
-        baseline: 'middle',
-        track: 1.2,
-      });
-
-      const sorted = [...run.placed].sort((x, y) => y.def.damage - x.def.damage);
-      const rows = Math.min(sorted.length, 8);
-      for (let i = 0; i < rows; i++) {
-        const w = i % 2;
-        const r = Math.floor(i / 2);
-        miniWeapon(g, {
-          x: lx + 20 + w * ((lw - 40) / 2 + 12),
-          y: 226 + r * 52,
-          w: (lw - 40) / 2,
-          h: 44,
-          def: sorted[i].def,
-        });
-      }
-      if (!sorted.length) {
-        text(g, 'No weapons were forged. Harsh.', lx + 20, 240, {
-          size: T.small,
-          weight: 500,
-          color: C.faint,
-          font: F.ui,
-          baseline: 'middle',
+      // Which words carried the engine. The craft counts are the story of the run:
+      // they show the player what their build actually did.
+      if (run) {
+        const used = run.state.blueprints.filter(Boolean) as string[];
+        const crafts = run.state.craftsByBlueprint;
+        const total = used.reduce((a, id) => a + (crafts[id] ?? 0), 0) || 1;
+        const cardW = 190;
+        const gap = 16;
+        const startX = VIEW.w / 2 - (used.length * cardW + (used.length - 1) * gap) / 2;
+        used.forEach((id, i) => {
+          const bp = BLUEPRINTS[id as keyof typeof BLUEPRINTS];
+          const n = crafts[id] ?? 0;
+          const x = startX + i * (cardW + gap);
+          const y = 486;
+          plate(g, x, y, cardW, 74, { radius: R.sm, fill: '#0f1626', edge: rgba(bp.color, 0.6), depth: 4 });
+          label(g, bp.word, x + 14, y + 28, { size: T.small, color: C.ink, weight: 800, tracking: 1.4 });
+          label(g, loc(bp.name), x + 14, y + 48, { size: 11, color: bp.color, weight: 700 });
+          label(g, `×${n}`, x + cardW - 14, y + 30, {
+            size: T.lead,
+            color: C.ink,
+            align: 'right',
+            weight: 800,
+          });
+          // Share of the run's output: the quiet answer to "what is my build doing?"
+          const barW = cardW - 28;
+          g.fillStyle = rgba('#000000', 0.4);
+          rr(g, x + 14, y + 58, barW, 6, 3);
+          g.fill();
+          if (n > 0) {
+            g.fillStyle = bp.color;
+            rr(g, x + 14, y + 58, Math.max(4, barW * (n / total)), 6, 3);
+            g.fill();
+          }
         });
       }
 
-      // buttons
-      button(g, app.kit, {
-        id: 'retry',
-        x: 60,
-        y: SIZE.h - 108,
-        w: 250,
-        h: 56,
-        label: 'RETRY SEED',
-        icon: 'arrow',
-        tone: 'primary',
-        sub: run.seedText,
-        size: T.body,
+      app.ui.button(g, 'summary.again', { x: VIEW.w / 2 - 260, y: 610, w: 240, h: 56 }, {
+        label: t('again'),
+        tone: C.gold,
+        fontSize: T.body,
       });
-      button(g, app.kit, {
-        id: 'new',
-        x: 322,
-        y: SIZE.h - 108,
-        w: 250,
-        h: 56,
-        label: 'NEW RUN',
-        icon: 'play',
-        tone: 'secondary',
-        size: T.body,
+      app.ui.button(g, 'summary.menu', { x: VIEW.w / 2 + 20, y: 610, w: 240, h: 56 }, {
+        label: t('toMenu'),
+        variant: 'ghost',
+        tone: C.cyan,
+        fontSize: T.body,
       });
-      button(g, app.kit, {
-        id: 'copy',
-        x: 584,
-        y: SIZE.h - 108,
-        w: 190,
-        h: 56,
-        label: 'COPY RUN',
-        icon: 'map',
-        tone: 'ghost',
-        size: T.small,
-      });
-      button(g, app.kit, {
-        id: 'title',
-        x: SIZE.w - 250,
-        y: SIZE.h - 108,
-        w: 190,
-        h: 56,
-        label: 'TITLE',
-        tone: 'ghost',
-        size: T.small,
-      });
-      text(g, `SEED  ${run.seedText}`, SIZE.w - 280, SIZE.h - 40, {
-        size: T.small,
-        weight: 700,
-        color: C.faint,
-        font: F.num,
-        baseline: 'middle',
-        track: 1.6,
-      });
-      void exportOpen;
+      void (g as unknown as Ctx);
+    },
+    click(id, app) {
+      if (id === 'summary.again') {
+        app.run = null;
+        store.saveRun(null);
+        app.goto('kit');
+      } else if (id === 'summary.menu') {
+        app.run = null;
+        store.saveRun(null);
+        app.goto('title');
+      }
     },
   };
 }
-
-function seedBlurb(run: RunState): string {
-  return [
-    `ALPHABET ENGINE run - seed ${run.seedText}`,
-    `${run.stats.wavesCleared} waves · ${run.stats.kills} kills · best cascade x${run.stats.bestCascade}`,
-    `${run.stats.forged} weapons forged · longest word ${run.stats.longestWord.toUpperCase()}`,
-  ].join('\n');
-}
-

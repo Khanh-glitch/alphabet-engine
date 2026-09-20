@@ -1,24 +1,18 @@
-# Godot 4+ specific ignores
+# Godot-specific ignores (kept: this repository may also host Godot work)
 .godot/
 .nomedia
-
-# Godot-specific ignores
 .import/
 export.cfg
 export_credentials.cfg
 *.tmp
-
-# Imported translations (automatically generated from CSV files)
 *.translation
-
-# Mono-specific ignores
 .mono/
 data_*/
 mono_crash.*.json
 
-# Node / web toolchain
+# Node / web build
 node_modules/
 dist/
-.vite/
-*.log
+tools/.build/
+*.local
 .DS_Store

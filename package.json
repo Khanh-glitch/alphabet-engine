@@ -1,0 +1,25 @@
+{
+  "name": "alphabet-engine",
+  "version": "0.1.0",
+  "description": "A systemic roguelite autobattler where letters form words, words become physical weapons, and combat creates self-feeding cascades.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Khanh-glitch/alphabet-engine.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Khanh-glitch/alphabet-engine/issues"
+  },
+  "homepage": "https://github.com/Khanh-glitch/alphabet-engine#readme",
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0"
+  },
+  "private": true,
+  "type": "module"
+}
